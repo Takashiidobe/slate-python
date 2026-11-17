@@ -1,0 +1,7 @@
+[build]
+target = "x86_64-unknown-linux-gnu"
+target-dir = "../cargo-target"
+rustflags = ["-A", "warnings", "-Clink-arg=-ldl", "-Clink-arg=../cpython/build-clang/Python/asm_trampoline.o", "-Clink-arg=-Wl,-E", "-Clink-arg=-lm"]
+
+[target.x86_64-unknown-linux-gnu]
+runner = "../run.sh"

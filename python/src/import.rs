@@ -1,0 +1,17162 @@
+//! Module definition and import implementation
+//! The size of 'void *', as computed by sizeof.
+//! Use static_assert() on C11 and newer
+//! PyObject_HEAD defines the initial segment of every PyObject.
+//! In 64+ bit systems, any object whose 32 bit reference count is >= 2**31
+//! will be treated as immortal.
+//!
+//! Using the lower 32 bits makes the value backwards compatible by allowing
+//! C-Extensions without the updated checks in Py_INCREF and Py_DECREF to safely
+//! increase and decrease the objects reference count.
+//!
+//! In order to offer sufficient resilience to C extensions using the stable ABI
+//! compiled against 3.11 or earlier, we set the initial value near the
+//! middle of the range (2**31, 2**32). That way the refcount can be
+//! off by ~1 billion without affecting immortality.
+//!
+//! Reference count increases will use saturated arithmetic, taking advantage of
+//! having all the lower 32 bits set, which will avoid the reference count to go
+//! beyond the refcount limit. Immortality checks for reference count decreases will
+//! be done by checking the bit sign flag in the lower 32 bits.
+//!
+//! To ensure that once an object becomes immortal, it remains immortal, the threshold
+//! for omitting increfs is much higher than for omitting decrefs. Consequently, once
+//! the refcount for an object exceeds _Py_IMMORTAL_MINIMUM_REFCNT it will gradually
+//! increase over time until it reaches _Py_IMMORTAL_INITIAL_REFCNT.
+//! Macros and static inline functions, trading safety for speed
+//! PyException_HEAD defines the initial segment of every exception class.
+//! Cast a function to the PyCFunction type to use it with PyMethodDef.
+//!
+//!
+//!
+//! This macro can be used to prevent compiler warnings if the first parameter
+//!
+//! uses a different pointer type than PyObject* (ex: METH_VARARGS and METH_O
+//!
+//! calling conventions).
+//!
+//!
+//!
+//! The macro can also be used for METH_FASTCALL and METH_VARARGS|METH_KEYWORDS
+//!
+//! calling conventions to avoid compiler warnings because the function has more
+//!
+//! than 2 parameters. The macro first casts the function to the
+//!
+//! "void func(void)" type to prevent compiler warnings.
+//!
+//!
+//!
+//! If a function is declared with the METH_NOARGS calling convention, it must
+//!
+//! have 2 parameters. Since the second parameter is unused, Py_UNUSED() can be
+//!
+//! used to prevent a compiler warning. If the function has a single parameter,
+//!
+//! it triggers an undefined behavior when Python calls it with 2 parameters
+//!
+//! (bpo-33012).
+//! A code object, the __code__ attribute
+//! This limitation is for performance and simplicity. If needed it can be
+//! removed (with effort).
+//! Remote debugger support
+//! PY_TIMEOUT_T is the integral type used to specify timeouts when waiting
+//!
+//! on a lock (see PyThread_acquire_lock_timed() below).
+//! Initial JUMP_BACKWARD counter.
+//! This determines when we create a trace for a loop.
+//! Chosen so that _PyObjectStackChunk is a power-of-two size.
+//! Largest tuple to save on freelist
+//! leads to warnings... __attribute__((cdecl))
+//! Various defines for all used memory orders in mimalloc
+//! Main tuning parameters for segment and page sizes
+//!
+//! Sizes for 64-bit (usually divide by two for 32-bit)
+//! Inlined definitions
+//! A value of 1 means that we attempt to specialize the *second* time each
+//!
+//! instruction is executed. Executing twice is a much better indicator of
+//!
+//! "hotness" than executing once, but additional warmup delays only prevent
+//!
+//! specialization. Most types stabilize by the second execution, too:
+//! Total tool ids available
+//! Set if import should check a module for subinterpreter support.
+//! Almost all errors causing Python initialization to fail
+//!
+//! other fields are set to 0
+//! This is equivalent to converting PYC_MAGIC_NUMBER to 2 bytes
+//! (little-endian) and then appending b'\r\n'.
+//! Bit flags for _gc_prev
+//!
+//! Bit 0 is set when tp_finalize is called
+// Cast a function to another function type T.
+//
+//
+//
+// The macro first casts the function to the "void func(void)" type
+//
+// to prevent compiler warnings.
+//
+//
+//
+// Note that using this cast only prevents the compiler from emitting
+//
+// warnings, but does not prevent an undefined behavior at runtime if
+//
+// the original function signature is not respected.
+// Signed variants of the above
+// Define macros for inline documentation.
+// Round up size "n" to be a multiple of "a".
+// Prevent using an expression as a l-value.
+//
+// For example, "int x; _Py_RVALUE(x) = 1;" fails with a compiler error.
+// Initial exit temperature.
+// Must be larger than ADAPTIVE_COOLDOWN_VALUE,
+// otherwise when a side exit warms up we may construct
+// a new trace before the Tier 1 code has properly re-specialized.
+// 64KiB  (32KiB on 32-bit)
+// 1024
+// Used as a special value to encode block sizes in 32 bits.
+// 35 == mi_segment_bin(MI_SLICES_PER_SEGMENT)
+// initialize a local variable to zero; use memset as compilers optimize constant sized memset's
+// A value of 52 means that we attempt to re-specialize after 53 misses (a prime
+//
+// number, useful for avoiding artifacts if every nth value is a different type
+//
+// or something). Setting the backoff to 0 means that the counter is reset to
+//
+// the same state as a warming-up instruction (value == 1, backoff == 1) after
+//
+// deoptimization. This isn't strictly necessary, but it is bit easier to reason
+//
+// about when thinking about the opcode transitions as a state machine:
+macro_rules! DLOPENFLAGS {
+    ($interp:expr) => {
+        unsafe { (*$interp).imports.dlopenflags }
+    };
+}
+
+macro_rules! FT_ATOMIC_STORE_INT_RELAXED {
+    ($value:expr, $new_value:expr) => {
+        unsafe {
+            $value = $new_value;
+        }
+    };
+}
+
+macro_rules! IMPORTLIB {
+    ($interp:expr) => {
+        unsafe { (*$interp).imports.importlib }
+    };
+}
+
+macro_rules! IMPORT_FUNC {
+    ($interp:expr) => {
+        unsafe { (*$interp).imports.import_func }
+    };
+}
+
+macro_rules! MODULES_BY_INDEX {
+    ($interp:expr) => {
+        unsafe { (*$interp).imports.modules_by_index }
+    };
+}
+
+macro_rules! MODULES {
+    ($interp:expr) => {
+        unsafe { (*$interp).imports.modules }
+    };
+}
+
+macro_rules! OVERRIDE_FROZEN_MODULES {
+    ($interp:expr) => {
+        unsafe { (*$interp).imports.override_frozen_modules }
+    };
+}
+
+macro_rules! OVERRIDE_MULTI_INTERP_EXTENSIONS_CHECK {
+    ($interp:expr) => {
+        unsafe { (*$interp).imports.override_multi_interp_extensions_check }
+    };
+}
+
+macro_rules! PyBytes_AS_STRING {
+    ($op:expr) => {
+        PyBytes_AS_STRING(_PyObject_CAST!($op))
+    };
+}
+
+macro_rules! PyCode_Check {
+    ($op:expr) => {
+        Py_IS_TYPE!($op, unsafe { core::ptr::addr_of_mut!(PyCode_Type) })
+    };
+}
+
+macro_rules! PyDict_CheckExact {
+    ($op:expr) => {
+        Py_IS_TYPE!($op, unsafe { core::ptr::addr_of_mut!(PyDict_Type) })
+    };
+}
+
+macro_rules! PyDict_Check {
+    ($op:expr) => {
+        PyType_FastSubclass!(Py_TYPE!($op), 536870912u64)
+    };
+}
+
+/// Mask the old API with a call to the new API for code compiled under
+/// Python 2.0:
+macro_rules! PyErr_BadInternalCall__124 {
+    () => {
+        unsafe {
+            _PyErr_BadInternalCall(
+                c"/home/takashi/c-corpus/cpython/Python/import.c".as_ptr(),
+                2320i32,
+            )
+        };
+    };
+}
+
+macro_rules! PyList_Check {
+    ($op:expr) => {
+        PyType_FastSubclass!(Py_TYPE!($op), 33554432u64)
+    };
+}
+
+macro_rules! PyList_GET_ITEM {
+    ($op:expr, $index:expr) => {
+        unsafe { *unsafe { (*_PyList_CAST!($op)).ob_item }.wrapping_offset(($index) as isize) }
+    };
+}
+
+macro_rules! PyList_GET_SIZE {
+    ($op:expr) => {
+        PyList_GET_SIZE(_PyObject_CAST!($op))
+    };
+}
+
+/// Implemented as a macro:
+///
+/// int PyMapping_DelItem(PyObject *o, PyObject *key);
+///
+/// Remove the mapping for the object 'key' from the mapping object 'o'.
+/// Returns -1 on failure.
+///
+/// This is equivalent to the Python statement: del o[key].
+macro_rules! PyMapping_DelItem {
+    ($O:expr, $K:expr) => {
+        unsafe { PyObject_DelItem($O, $K) }
+    };
+}
+
+/// Implemented as a macro:
+///
+/// int PyMapping_DelItem(PyObject *o, PyObject *key);
+///
+/// Remove the mapping for the object 'key' from the mapping object 'o'.
+/// Returns -1 on failure.
+///
+/// This is equivalent to the Python statement: del o[key].
+macro_rules! PyMapping_DelItem__2 {
+    ($O:expr, $K:expr) => {
+        unsafe { PyObject_DelItem($O, $K) };
+    };
+}
+
+macro_rules! PyModule_Check {
+    ($op:expr) => {
+        PyObject_TypeCheck!($op, unsafe { core::ptr::addr_of_mut!(PyModule_Type) })
+    };
+}
+
+macro_rules! PyModule_FromDefAndSpec {
+    ($module:expr, $spec:expr) => {
+        unsafe { PyModule_FromDefAndSpec2($module, $spec, 1013i32) }
+    };
+}
+
+macro_rules! PyObject_TypeCheck {
+    ($ob:expr, $type:expr) => {
+        PyObject_TypeCheck(_PyObject_CAST!($ob), $type)
+    };
+}
+
+/// Alias to PyThreadState_Get()
+macro_rules! PyThreadState_GET {
+    () => {
+        unsafe { PyThreadState_Get() }
+    };
+}
+
+macro_rules! PyTuple_GET_ITEM {
+    ($op:expr, $index:expr) => {
+        unsafe {
+            *((*_PyTuple_CAST!($op)).ob_item.as_mut_ptr() as *mut *mut _object)
+                .wrapping_offset(($index) as isize)
+        }
+    };
+}
+
+macro_rules! PyTuple_GET_SIZE {
+    ($op:expr) => {
+        PyTuple_GET_SIZE(_PyObject_CAST!($op))
+    };
+}
+
+macro_rules! PyType_FastSubclass {
+    ($type:expr, $flag:expr) => {
+        PyType_HasFeature($type, $flag)
+    };
+}
+
+macro_rules! PyUnicode_Check {
+    ($op:expr) => {
+        PyType_FastSubclass!(Py_TYPE!($op), 268435456u64)
+    };
+}
+
+macro_rules! PyUnicode_GET_LENGTH {
+    ($op:expr) => {
+        PyUnicode_GET_LENGTH(_PyObject_CAST!($op))
+    };
+}
+
+macro_rules! Py_CLEAR__2 {
+    ($op:expr) => {
+        loop {
+            let _tmp_op_ptr: *mut *mut _object = core::ptr::addr_of_mut!($op);
+            let _tmp_old_op: *mut _object = unsafe { *_tmp_op_ptr };
+            if !_tmp_old_op.is_null() {
+                unsafe {
+                    *_tmp_op_ptr = core::ptr::null_mut::<_object>();
+                }
+                Py_DECREF!(_tmp_old_op);
+            }
+            if true {
+                break;
+            }
+        }
+    };
+}
+
+macro_rules! Py_CLEAR {
+    ($op:expr) => {
+        loop {
+            let _tmp_op_ptr: *mut *mut _object = unsafe { core::ptr::addr_of_mut!($op) };
+            let _tmp_old_op: *mut _object = unsafe { *_tmp_op_ptr };
+            if !_tmp_old_op.is_null() {
+                unsafe {
+                    *_tmp_op_ptr = core::ptr::null_mut::<_object>();
+                }
+                Py_DECREF!(_tmp_old_op);
+            }
+            if true {
+                break;
+            }
+        }
+    };
+}
+
+macro_rules! Py_DECREF__2 {
+    ($op:expr) => {
+        Py_DECREF(_PyObject_CAST__2!($op));
+    };
+}
+
+macro_rules! Py_DECREF {
+    ($op:expr) => {
+        Py_DECREF(_PyObject_CAST!($op));
+    };
+}
+
+macro_rules! Py_FatalError__22 {
+    ($message:expr) => {
+        unsafe { _Py_FatalErrorFunc(c"_modules_by_index_clear_one".as_ptr(), $message) };
+        unsafe { core::hint::unreachable_unchecked() };
+    };
+}
+
+macro_rules! Py_FatalError__23 {
+    ($message:expr) => {
+        unsafe {
+            _Py_FatalErrorFunc(
+                c"PyImport_ExecCodeModuleWithPathnames".as_ptr(),
+                ($message) as *const i8,
+            )
+        };
+        unsafe { core::hint::unreachable_unchecked() };
+    };
+}
+
+macro_rules! Py_FatalError__26 {
+    ($message:expr) => {
+        unsafe { _Py_FatalErrorFunc(c"PyImport_AppendInittab".as_ptr(), ($message) as *const i8) };
+        unsafe { core::hint::unreachable_unchecked() };
+    };
+}
+
+macro_rules! Py_FatalError__34 {
+    ($message:expr) => {
+        unsafe { _Py_FatalErrorFunc(c"PyImport_ExtendInittab".as_ptr(), ($message) as *const i8) };
+        unsafe { core::hint::unreachable_unchecked() };
+    };
+}
+
+macro_rules! Py_FatalError__36 {
+    ($message:expr) => {
+        unsafe { _Py_FatalErrorFunc(c"PyState_AddModule".as_ptr(), ($message) as *const i8) };
+        unsafe { core::hint::unreachable_unchecked() };
+    };
+}
+
+macro_rules! Py_FatalError__46 {
+    ($message:expr) => {
+        unsafe { _Py_FatalErrorFunc(c"get_modules_dict".as_ptr(), ($message) as *const i8) };
+        unsafe { core::hint::unreachable_unchecked() };
+    };
+}
+
+macro_rules! Py_INCREF {
+    ($op:expr) => {
+        Py_INCREF(_PyObject_CAST!($op));
+    };
+}
+
+macro_rules! Py_IS_TYPE {
+    ($ob:expr, $type:expr) => {
+        Py_IS_TYPE(_PyObject_CAST!($ob), $type)
+    };
+}
+
+macro_rules! Py_NewRef {
+    ($obj:expr) => {
+        _Py_NewRef(_PyObject_CAST!($obj))
+    };
+}
+
+macro_rules! Py_REFCNT {
+    ($ob:expr) => {
+        _Py_REFCNT(_PyObject_CAST!($ob))
+    };
+}
+
+macro_rules! Py_SETREF {
+    ($dst:expr, $src:expr) => {
+        loop {
+            let _tmp_dst_ptr: *mut *mut _object = core::ptr::addr_of_mut!($dst);
+            let _tmp_old_dst: *mut _object = unsafe { *_tmp_dst_ptr };
+            unsafe {
+                *_tmp_dst_ptr = $src;
+            }
+            Py_DECREF!(_tmp_old_dst);
+            if true {
+                break;
+            }
+        }
+    };
+}
+
+macro_rules! Py_SETREF__5 {
+    ($dst:expr) => {
+        loop {
+            let _tmp_dst_ptr: *mut *mut _object = unsafe { core::ptr::addr_of_mut!($dst) };
+            let _tmp_old_dst: *mut _object = unsafe { *_tmp_dst_ptr };
+            unsafe {
+                *_tmp_dst_ptr = core::ptr::null_mut::<_object>();
+            }
+            Py_DECREF!(_tmp_old_dst);
+            if true {
+                break;
+            }
+        }
+    };
+}
+
+macro_rules! Py_SIZE {
+    ($ob:expr) => {
+        Py_SIZE(_PyObject_CAST__2!($ob))
+    };
+}
+
+macro_rules! Py_TYPE {
+    ($ob:expr) => {
+        _Py_TYPE(_PyObject_CAST!($ob))
+    };
+}
+
+macro_rules! Py_UNREACHABLE {
+    () => {
+        unsafe { core::hint::unreachable_unchecked() };
+    };
+}
+
+macro_rules! Py_XDECREF {
+    ($op:expr) => {
+        Py_XDECREF(_PyObject_CAST!($op));
+    };
+}
+
+macro_rules! Py_XINCREF {
+    ($op:expr) => {
+        Py_XINCREF(_PyObject_CAST!($op));
+    };
+}
+
+macro_rules! Py_XNewRef {
+    ($obj:expr) => {
+        _Py_XNewRef(_PyObject_CAST!($obj))
+    };
+}
+
+macro_rules! Py_XSETREF {
+    ($dst:expr, $src:expr) => {
+        loop {
+            let _tmp_dst_ptr: *mut *mut _object = unsafe { core::ptr::addr_of_mut!($dst) };
+            let _tmp_old_dst: *mut _object = unsafe { *_tmp_dst_ptr };
+            unsafe {
+                *_tmp_dst_ptr = $src;
+            }
+            Py_XDECREF!(_tmp_old_dst);
+            if true {
+                break;
+            }
+        }
+    };
+}
+
+macro_rules! _IMPORT_TIME_HEADER {
+    ($interp:expr) => {
+        loop {
+            if (unsafe { (*$interp).imports.find_and_load.header }) != 0 {
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                unsafe {
+                    slate_support::fputs(
+                        c"import time: self [us] | cumulative | imported package\n".as_ptr(),
+                        slate_support::stderr(),
+                    )
+                };
+                unsafe { fflush(core::ptr::null_mut()) };
+                unsafe {
+                    (*$interp).imports.find_and_load.header = 0;
+                }
+            }
+            if true {
+                break;
+            }
+        }
+    };
+}
+
+macro_rules! _PyASCIIObject_CAST {
+    ($op:expr) => {
+        _Py_CAST!(*mut __SlateRecord_unicodeobject_h_163, $op)
+    };
+}
+
+macro_rules! _PyArg_CheckPositional {
+    ($funcname:expr, $nargs:expr, $min:expr, $max:expr) => {{
+        let __v: bool =
+            !_Py_ANY_VARARGS!($max) && (($min) as i64) <= $nargs && ($nargs) <= (($max) as i64)
+                || (unsafe {
+                    _PyArg_CheckPositional(
+                        ($funcname) as *const i8,
+                        $nargs,
+                        ($min) as i64,
+                        ($max) as i64,
+                    )
+                }) != 0;
+        __v
+    }};
+}
+
+macro_rules! _PyArg_UnpackKeywords {
+    ($args:expr, $nargs:expr, $kwargs:expr, $kwnames:expr, $parser:expr, $minpos:expr, $maxpos:expr, $minkw:expr, $varpos:expr, $buf:expr) => {{
+        let __v: *const *mut _object = if ($minkw) == 0
+            && $kwargs.is_null()
+            && $kwnames.is_null()
+            && (($minpos) as i64) <= $nargs
+            && (($varpos) != 0 || ($nargs) <= (($maxpos) as i64))
+            && !$args.is_null()
+        {
+            $args
+        } else {
+            unsafe {
+                _PyArg_UnpackKeywords(
+                    $args,
+                    $nargs,
+                    core::ptr::null_mut::<_object>(),
+                    $kwnames,
+                    $parser,
+                    $minpos,
+                    $maxpos,
+                    $minkw,
+                    $varpos,
+                    $buf,
+                )
+            }
+        };
+        __v
+    }};
+}
+
+/// Macros and static inline functions, trading safety for speed
+macro_rules! _PyBytes_CAST {
+    ($op:expr) => {
+        _Py_CAST!(*mut __SlateRecord_bytesobject_h_15, $op)
+    };
+}
+
+/// Cast argument to PyListObject* type.
+macro_rules! _PyList_CAST {
+    ($op:expr) => {
+        _Py_CAST!(*mut __SlateRecord_listobject_h_22, $op)
+    };
+}
+
+/// Cast argument to PyObject* type.
+macro_rules! _PyObject_CAST {
+    ($op:expr) => {
+        _Py_CAST__2!($op)
+    };
+}
+
+/// Cast argument to PyObject* type.
+macro_rules! _PyObject_CAST__2 {
+    ($op:expr) => {
+        _Py_CAST!(*mut _object, $op)
+    };
+}
+
+macro_rules! _PyStatus_GET_FUNC__42 {
+    () => {
+        c"_PyImport_InitCore".as_ptr() as *mut i8
+    };
+}
+
+macro_rules! _PyStatus_GET_FUNC__45 {
+    () => {
+        c"_PyImport_Init".as_ptr() as *mut i8
+    };
+}
+
+macro_rules! _PyStatus_GET_FUNC__27 {
+    () => {
+        c"_PyImport_InitExternal".as_ptr() as *mut i8
+    };
+}
+
+/// Cast argument to PyTupleObject* type.
+macro_rules! _PyTuple_CAST {
+    ($op:expr) => {
+        _Py_CAST!(*mut __SlateRecord_tupleobject_h_13, $op)
+    };
+}
+
+/// Cast argument to PyVarObject* type.
+macro_rules! _PyVarObject_CAST {
+    ($op:expr) => {
+        _Py_CAST!(*mut __SlateRecord_object_h_172, $op)
+    };
+}
+
+macro_rules! _Py_ANY_VARARGS {
+    ($n:expr) => {
+        (($n) as i64) == 9223372036854775807
+    };
+}
+
+/// Macro to use the more powerful/dangerous C-style cast even in C++.
+macro_rules! _Py_CAST__2 {
+    ($expr:expr) => {
+        $expr
+    };
+}
+
+/// Macro to use the more powerful/dangerous C-style cast even in C++.
+macro_rules! _Py_CAST {
+    ($type:ty, $expr:expr) => {
+        ($expr) as $type
+    };
+}
+
+macro_rules! _Py_DECREF_IMMORTAL_STAT_INC {
+    () => {};
+}
+
+macro_rules! _Py_DECREF_STAT_INC {
+    () => {};
+}
+
+macro_rules! _Py_INCREF_IMMORTAL_STAT_INC {
+    () => {};
+}
+
+macro_rules! _Py_INCREF_STAT_INC {
+    () => {};
+}
+
+macro_rules! _Py_IsImmortal {
+    ($op:expr) => {
+        _Py_IsImmortal(_PyObject_CAST!($op))
+    };
+}
+
+macro_rules! _Py_STATIC_CAST {
+    ($type:ty, $expr:expr) => {
+        ($expr) as $type
+    };
+}
+
+unsafe extern "C" {
+    static mut _Py_NoneStruct: _object;
+    static mut PyExc_ImportError: *mut _object;
+    static mut PyExc_KeyError: *mut _object;
+    static mut PyExc_MemoryError: *mut _object;
+    static mut PyExc_RuntimeError: *mut _object;
+    static mut PyExc_SystemError: *mut _object;
+    static mut PyExc_TypeError: *mut _object;
+    static mut PyExc_ValueError: *mut _object;
+    static mut PyExc_DeprecationWarning: *mut _object;
+    static mut PyExc_ImportWarning: *mut _object;
+    static mut _Py_FalseStruct: _longobject;
+    static mut _Py_TrueStruct: _longobject;
+    static mut PyTuple_Type: _typeobject;
+    static mut PyDict_Type: _typeobject;
+    static mut PyModule_Type: _typeobject;
+    static mut PyCode_Type: _typeobject;
+    static mut PyImport_FrozenModules: *const _frozen;
+    #[thread_local]
+    static mut _Py_tss_tstate: *mut _ts;
+    static mut _PyImport_FrozenBootstrap: *const _frozen;
+    static mut _PyImport_FrozenStdlib: *const _frozen;
+    static mut _PyImport_FrozenTest: *const _frozen;
+    static mut _PyImport_FrozenAliases: *const _module_alias;
+    static mut _PyRuntime: pyruntimestate;
+    static mut _PyImport_DynLoadFiletab: [*const i8; 0];
+    static mut _PyImport_Inittab: [_inittab; 0];
+    static mut _PySys_ImplCacheTag: *const i8;
+    fn index(arg0: *const i8, arg1: i32) -> *mut i8;
+    fn PyMem_RawMalloc(arg0: u64) -> *mut ();
+    fn PyMem_RawFree(arg0: *mut ());
+    fn PyObject_CheckBuffer(arg0: *mut _object) -> i32;
+    fn PyObject_GetBuffer(
+        arg0: *mut _object,
+        arg1: *mut __SlateRecord_pybuffer_h_33,
+        arg2: i32,
+    ) -> i32;
+    fn PyBuffer_Release(arg0: *mut __SlateRecord_pybuffer_h_33);
+    fn PyMutex_Lock(arg0: *mut PyMutex);
+    fn PyMutex_Unlock(arg0: *mut PyMutex);
+    fn PyType_IsSubtype(arg0: *mut _typeobject, arg1: *mut _typeobject) -> i32;
+    fn PyObject_RichCompareBool(arg0: *mut _object, arg1: *mut _object, arg2: i32) -> i32;
+    fn PyObject_GetAttrString(arg0: *mut _object, arg1: *const i8) -> *mut _object;
+    fn PyObject_GetAttr(arg0: *mut _object, arg1: *mut _object) -> *mut _object;
+    fn PyObject_GetOptionalAttr(
+        arg0: *mut _object,
+        arg1: *mut _object,
+        arg2: *mut *mut _object,
+    ) -> i32;
+    fn PyObject_HasAttrWithError(arg0: *mut _object, arg1: *mut _object) -> i32;
+    fn PyObject_IsTrue(arg0: *mut _object) -> i32;
+    fn _Py_Dealloc(arg0: *mut _object);
+    fn Py_HashBuffer(arg0: *const (), arg1: i64) -> i64;
+    fn PyBytes_FromStringAndSize(arg0: *const i8, arg1: i64) -> *mut _object;
+    fn PyUnicode_FromString(arg0: *const i8) -> *mut _object;
+    fn PyUnicode_Substring(arg0: *mut _object, arg1: i64, arg2: i64) -> *mut _object;
+    fn PyUnicode_FromFormat(arg0: *const i8, ...) -> *mut _object;
+    fn PyUnicode_InternFromString(arg0: *const i8) -> *mut _object;
+    fn PyUnicode_FromWideChar(arg0: *const i32, arg1: i64) -> *mut _object;
+    fn PyUnicode_AsEncodedString(
+        arg0: *mut _object,
+        arg1: *const i8,
+        arg2: *const i8,
+    ) -> *mut _object;
+    fn PyUnicode_DecodeFSDefault(arg0: *const i8) -> *mut _object;
+    fn PyUnicode_FindChar(arg0: *mut _object, arg1: u32, arg2: i64, arg3: i64, arg4: i32) -> i64;
+    fn PyUnicode_Compare(arg0: *mut _object, arg1: *mut _object) -> i32;
+    fn PyUnicode_CompareWithASCIIString(arg0: *mut _object, arg1: *const i8) -> i32;
+    fn PyUnicode_AsUTF8(arg0: *mut _object) -> *const i8;
+    fn PyErr_SetString(arg0: *mut _object, arg1: *const i8);
+    fn PyErr_Occurred() -> *mut _object;
+    fn PyErr_Clear();
+    fn PyErr_GetRaisedException() -> *mut _object;
+    fn PyErr_SetRaisedException(arg0: *mut _object);
+    fn PyErr_ExceptionMatches(arg0: *mut _object) -> i32;
+    fn PyException_SetTraceback(arg0: *mut _object, arg1: *mut _object) -> i32;
+    fn PyException_GetTraceback(arg0: *mut _object) -> *mut _object;
+    fn PyErr_NoMemory() -> *mut _object;
+    fn PyErr_Format(arg0: *mut _object, arg1: *const i8, ...) -> *mut _object;
+    fn PyErr_SetImportError(
+        arg0: *mut _object,
+        arg1: *mut _object,
+        arg2: *mut _object,
+    ) -> *mut _object;
+    fn _PyErr_BadInternalCall(arg0: *const i8, arg1: i32);
+    fn _PyErr_ChainExceptions1(arg0: *mut _object);
+    fn _Py_FatalErrorFunc(arg0: *const i8, arg1: *const i8);
+    fn PyErr_FormatUnraisable(arg0: *const i8, ...);
+    fn PyLong_FromLong(arg0: i64) -> *mut _object;
+    fn PyLong_AsLong(arg0: *mut _object) -> i64;
+    fn PyLong_AsInt(arg0: *mut _object) -> i32;
+    fn PyBool_FromLong(arg0: i64) -> *mut _object;
+    fn PyMemoryView_FromMemory(arg0: *mut i8, arg1: i64, arg2: i32) -> *mut _object;
+    fn PyTuple_Pack(arg0: i64, ...) -> *mut _object;
+    fn PyList_New(arg0: i64) -> *mut _object;
+    fn PyList_Size(arg0: *mut _object) -> i64;
+    fn PyList_GetItem(arg0: *mut _object, arg1: i64) -> *mut _object;
+    fn PyList_SetItem(arg0: *mut _object, arg1: i64, arg2: *mut _object) -> i32;
+    fn PyList_Insert(arg0: *mut _object, arg1: i64, arg2: *mut _object) -> i32;
+    fn PyList_Append(arg0: *mut _object, arg1: *mut _object) -> i32;
+    fn PyList_SetSlice(arg0: *mut _object, arg1: i64, arg2: i64, arg3: *mut _object) -> i32;
+    fn PyDict_New() -> *mut _object;
+    fn PyDict_SetItem(arg0: *mut _object, arg1: *mut _object, arg2: *mut _object) -> i32;
+    fn PyDict_Copy(arg0: *mut _object) -> *mut _object;
+    fn PyDict_Contains(arg0: *mut _object, arg1: *mut _object) -> i32;
+    fn PyDict_Update(arg0: *mut _object, arg1: *mut _object) -> i32;
+    fn PyDict_SetItemString(arg0: *mut _object, arg1: *const i8, arg2: *mut _object) -> i32;
+    fn PyDict_GetItemRef(arg0: *mut _object, arg1: *mut _object, arg2: *mut *mut _object) -> i32;
+    fn PyDict_GetItemStringRef(arg0: *mut _object, arg1: *const i8, arg2: *mut *mut _object)
+    -> i32;
+    fn PyDict_Pop(arg0: *mut _object, arg1: *mut _object, arg2: *mut *mut _object) -> i32;
+    fn PyModule_NewObject(arg0: *mut _object) -> *mut _object;
+    fn PyModule_GetDict(arg0: *mut _object) -> *mut _object;
+    fn PyModule_GetDef(arg0: *mut _object) -> *mut PyModuleDef;
+    fn PyModule_GetState(arg0: *mut _object) -> *mut ();
+    fn PyModuleDef_Init(arg0: *mut PyModuleDef) -> *mut _object;
+    fn PyFrame_GetCode(arg0: *mut _frame) -> *mut PyCodeObject;
+    fn PyStatus_NoMemory() -> __SlateRecord_initconfig_h_19;
+    fn PyInterpreterState_GetID(arg0: *mut _is) -> i64;
+    fn PyThreadState_Clear(arg0: *mut _ts);
+    fn PyThreadState_Delete(arg0: *mut _ts);
+    fn PyThreadState_Get() -> *mut _ts;
+    fn PyThreadState_Swap(arg0: *mut _ts) -> *mut _ts;
+    fn PyErr_WarnEx(arg0: *mut _object, arg1: *const i8, arg2: i64) -> i32;
+    fn PyWeakref_NewRef(arg0: *mut _object, arg1: *mut _object) -> *mut _object;
+    fn PyTime_PerfCounterRaw(arg0: *mut i64) -> i32;
+    fn Py_BuildValue(arg0: *const i8, ...) -> *mut _object;
+    fn PyModule_AddObjectRef(arg0: *mut _object, arg1: *const i8, arg2: *mut _object) -> i32;
+    fn PyModule_Add(arg0: *mut _object, arg1: *const i8, arg2: *mut _object) -> i32;
+    fn PyModule_AddIntConstant(arg0: *mut _object, arg1: *const i8, arg2: i64) -> i32;
+    fn PyModule_ExecDef(arg0: *mut _object, arg1: *mut PyModuleDef) -> i32;
+    fn PyModule_FromDefAndSpec2(
+        arg0: *mut PyModuleDef,
+        arg1: *mut _object,
+        arg2: i32,
+    ) -> *mut _object;
+    fn PyErr_Print();
+    fn PyErr_PrintEx(arg0: i32);
+    fn PyEval_EvalCode(arg0: *mut _object, arg1: *mut _object, arg2: *mut _object) -> *mut _object;
+    fn PyEval_GetBuiltins() -> *mut _object;
+    fn PyEval_GetGlobals() -> *mut _object;
+    fn PySys_WriteStderr(arg0: *const i8, ...);
+    fn PySys_FormatStderr(arg0: *const i8, ...);
+    fn PySys_Audit(arg0: *const i8, arg1: *const i8, ...) -> i32;
+    fn PyObject_CallFunction(arg0: *mut _object, arg1: *const i8, ...) -> *mut _object;
+    fn PyObject_CallMethod(
+        arg0: *mut _object,
+        arg1: *const i8,
+        arg2: *const i8,
+        ...
+    ) -> *mut _object;
+    fn PyObject_CallMethodObjArgs(arg0: *mut _object, arg1: *mut _object, ...) -> *mut _object;
+    fn PyObject_VectorcallMethod(
+        arg0: *mut _object,
+        arg1: *const *mut _object,
+        arg2: u64,
+        arg3: *mut _object,
+    ) -> *mut _object;
+    fn PyObject_GetItem(arg0: *mut _object, arg1: *mut _object) -> *mut _object;
+    fn PyObject_SetItem(arg0: *mut _object, arg1: *mut _object, arg2: *mut _object) -> i32;
+    fn PyObject_DelItem(arg0: *mut _object, arg1: *mut _object) -> i32;
+    fn PySequence_Contains(arg0: *mut _object, arg1: *mut _object) -> i32;
+    fn PyMapping_GetOptionalItem(
+        arg0: *mut _object,
+        arg1: *mut _object,
+        arg2: *mut *mut _object,
+    ) -> i32;
+    fn PyMapping_SetItemString(arg0: *mut _object, arg1: *const i8, arg2: *mut _object) -> i32;
+    fn PyObject_CallOneArg(arg0: *mut _object, arg1: *mut _object) -> *mut _object;
+    fn Py_fopen(arg0: *mut _object, arg1: *const i8) -> *mut slate_support::FILE;
+    fn _PySys_Audit(arg0: *mut _ts, arg1: *const i8, arg2: *const i8, ...) -> i32;
+    fn _PyMem_DefaultRawMalloc(arg0: u64) -> *mut ();
+    fn _PyMem_DefaultRawRealloc(arg0: *mut (), arg1: u64) -> *mut ();
+    fn _PyMem_DefaultRawFree(arg0: *mut ());
+    fn _PyRecursiveMutex_IsLockedByCurrentThread(arg0: *mut __SlateRecord_pycore_lock_h_153)
+    -> i32;
+    fn _PyRecursiveMutex_Lock(arg0: *mut __SlateRecord_pycore_lock_h_153);
+    fn _PyRecursiveMutex_Unlock(arg0: *mut __SlateRecord_pycore_lock_h_153);
+    fn PyThread_get_thread_ident_ex() -> u64;
+    fn _Py_hashtable_new_full(
+        arg0: Option<unsafe extern "C-unwind" fn(*const ()) -> u64>,
+        arg1: Option<unsafe extern "C-unwind" fn(*const (), *const ()) -> i32>,
+        arg2: Option<unsafe extern "C-unwind" fn(*mut ())>,
+        arg3: Option<unsafe extern "C-unwind" fn(*mut ())>,
+        arg4: *mut __SlateRecord_pycore_hashtable_h_56,
+    ) -> *mut _Py_hashtable_t;
+    fn _Py_hashtable_destroy(arg0: *mut _Py_hashtable_t);
+    fn _Py_hashtable_set(arg0: *mut _Py_hashtable_t, arg1: *const (), arg2: *mut ()) -> i32;
+    fn _Py_FatalErrorFormat(arg0: *const i8, arg1: *const i8, ...);
+    fn _PyErr_GetRaisedException(arg0: *mut _ts) -> *mut _object;
+    fn _PyErr_ExceptionMatches(arg0: *mut _ts, arg1: *mut _object) -> i32;
+    fn _PyErr_SetRaisedException(arg0: *mut _ts, arg1: *mut _object);
+    fn _PyErr_SetObject(arg0: *mut _ts, arg1: *mut _object, arg2: *mut _object);
+    fn _PyErr_Clear(arg0: *mut _ts);
+    fn _PyErr_SetString(arg0: *mut _ts, arg1: *mut _object, arg2: *const i8);
+    fn _PyErr_Format(arg0: *mut _ts, arg1: *mut _object, arg2: *const i8, ...) -> *mut _object;
+    fn _PyInterpreterState_HasFeature(arg0: *mut _is, arg1: u64) -> i32;
+    fn _PyInterpreterState_GetConfig(arg0: *mut _is) -> *const PyConfig;
+    fn _PyInterpreterState_Main() -> *mut _is;
+    fn _PyThreadState_NewBound(arg0: *mut _is, arg1: i32) -> *mut _ts;
+    fn _Py_GetConfig() -> *const PyConfig;
+    fn _PyEval_EnsureBuiltinsWithModule(
+        arg0: *mut _ts,
+        arg1: *mut _object,
+        arg2: *mut *mut _object,
+    ) -> i32;
+    fn _PyModuleSpec_IsInitializing(arg0: *mut _object) -> i32;
+    fn _PyNamespace_New(arg0: *mut _object) -> *mut _object;
+    fn _Py_SetImmortalUntracked(arg0: *mut _object);
+    fn _Py_KeyedHash(arg0: u64, arg1: *const (), arg2: i64) -> u64;
+    fn _PyErr_Print(arg0: *mut _ts);
+    fn _PySys_GetOptionalAttrString(arg0: *const i8, arg1: *mut *mut _object) -> i32;
+    fn _PySys_GetRequiredAttrString(arg0: *const i8) -> *mut _object;
+    fn _PySys_ClearAttrString(arg0: *mut _is, arg1: *const i8, arg2: i32) -> i32;
+    fn _PyTime_AsMicroseconds(arg0: i64, arg1: u32) -> i64;
+    fn _PyUnicode_Copy(arg0: *mut _object) -> *mut _object;
+    fn _PyUnicode_EqualToASCIIString(arg0: *mut _object, arg1: *const i8) -> i32;
+    fn _PyUnicode_InternImmortal(arg0: *mut _is, arg1: *mut *mut _object);
+    fn _PyUnicode_AsUTF8NoNUL(arg0: *mut _object) -> *const i8;
+    fn PyMarshal_ReadObjectFromString(arg0: *const i8, arg1: i64) -> *mut _object;
+    fn _Py_ext_module_loader_info_clear(arg0: *mut _Py_ext_module_loader_info);
+    fn _Py_ext_module_loader_info_init_for_builtin(
+        arg0: *mut _Py_ext_module_loader_info,
+        arg1: *mut _object,
+    ) -> i32;
+    fn _Py_ext_module_loader_info_init_from_spec(
+        arg0: *mut _Py_ext_module_loader_info,
+        arg1: *mut _object,
+    ) -> i32;
+    fn _Py_ext_module_loader_result_clear(arg0: *mut _Py_ext_module_loader_result);
+    fn _Py_ext_module_loader_result_apply_error(
+        arg0: *mut _Py_ext_module_loader_result,
+        arg1: *const i8,
+    );
+    fn _PyImport_GetModInitFunc(
+        arg0: *mut _Py_ext_module_loader_info,
+        arg1: *mut slate_support::FILE,
+    ) -> Option<unsafe extern "C-unwind" fn() -> *mut _object>;
+    fn _PyImport_RunModInitFunc(
+        arg0: Option<unsafe extern "C-unwind" fn() -> *mut _object>,
+        arg1: *mut _Py_ext_module_loader_info,
+        arg2: *mut _Py_ext_module_loader_result,
+    ) -> i32;
+    fn _PyArg_CheckPositional(arg0: *const i8, arg1: i64, arg2: i64, arg3: i64) -> i32;
+    fn _PyArg_BadArgument(arg0: *const i8, arg1: *const i8, arg2: *const i8, arg3: *mut _object);
+    fn _PyArg_UnpackKeywords(
+        arg0: *const *mut _object,
+        arg1: i64,
+        arg2: *mut _object,
+        arg3: *mut _object,
+        arg4: *mut _PyArg_Parser,
+        arg5: i32,
+        arg6: i32,
+        arg7: i32,
+        arg8: i32,
+        arg9: *mut *mut _object,
+    ) -> *const *mut _object;
+    fn __builtin_unreachable();
+}
+
+unsafe extern "C" {
+    fn fflush(_0: *mut slate_support::FILE) -> i32;
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord___sigset_t_h_8 {
+    __val: [u64; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_atomic_wide_counter_h_33 {
+    __value64: u64,
+    __value32: __SlateRecord_atomic_wide_counter_h_33_2,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_atomic_wide_counter_h_33_2 {
+    __low: u32,
+    __high: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __pthread_internal_list {
+    __prev: *mut __pthread_internal_list,
+    __next: *mut __pthread_internal_list,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __pthread_mutex_s {
+    __lock: i32,
+    __count: u32,
+    __owner: i32,
+    __nusers: u32,
+    __kind: i32,
+    __spins: i16,
+    __glibc_reserved: i16,
+    __list: __pthread_internal_list,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __pthread_cond_s {
+    __wseq: __SlateRecord_atomic_wide_counter_h_33,
+    __g1_start: __SlateRecord_atomic_wide_counter_h_33,
+    __g_size: [u32; 2],
+    __g1_orig_size: u32,
+    __wrefs: u32,
+    __g_signals: [u32; 2],
+    __unused_initialized_1: u32,
+    __unused_initialized_2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_pthreadtypes_h_45 {
+    __size: [i8; 4],
+    __align: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_pthreadtypes_h_72 {
+    __data: __pthread_mutex_s,
+    __size: [i8; 40],
+    __align: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_pthreadtypes_h_80 {
+    __data: __pthread_cond_s,
+    __size: [i8; 48],
+    __align: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pymem_h_48 {
+    ctx: *mut (),
+    malloc: Option<unsafe extern "C-unwind" fn(*mut (), u64) -> *mut ()>,
+    calloc: Option<unsafe extern "C-unwind" fn(*mut (), u64, u64) -> *mut ()>,
+    realloc: Option<unsafe extern "C-unwind" fn(*mut (), *mut (), u64) -> *mut ()>,
+    free: Option<unsafe extern "C-unwind" fn(*mut (), *mut ())>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pybuffer_h_33 {
+    buf: *mut (),
+    obj: *mut _object,
+    len: i64,
+    itemsize: i64,
+    readonly: i32,
+    ndim: i32,
+    format: *mut i8,
+    shape: *mut i64,
+    strides: *mut i64,
+    suboffsets: *mut i64,
+    internal: *mut (),
+}
+
+// Flags for getting buffers. Keep these in sync with inspect.BufferFlags.
+fn _Py_atomic_add_ssize(obj: *mut i64, value: i64) -> i64 {
+    unsafe {
+        let __t1 = value;
+        let __t0 = core::sync::atomic::AtomicI64::from_ptr(obj as *mut i64)
+            .fetch_add(__t1, core::sync::atomic::Ordering::SeqCst);
+        __t0
+    }
+}
+
+fn _Py_atomic_compare_exchange_uint8(obj: *mut u8, expected: &mut u8, desired: u8) -> i32 {
+    let __v0: bool = unsafe {
+        let __t0 = expected as *mut u8;
+        let __t1 = desired;
+        let __t2 = core::sync::atomic::AtomicU8::from_ptr(obj as *mut u8).compare_exchange(
+            *__t0,
+            __t1,
+            core::sync::atomic::Ordering::SeqCst,
+            core::sync::atomic::Ordering::SeqCst,
+        );
+        match __t2 {
+            Ok(_) => true,
+            Err(__t3) => {
+                *__t0 = __t3;
+                false
+            }
+        }
+    };
+    __v0 as i32
+}
+
+fn _Py_atomic_load_uint8(obj: *const u8) -> u8 {
+    unsafe {
+        core::sync::atomic::AtomicU8::from_ptr(obj as *mut u8)
+            .load(core::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PyMutex {
+    _bits: u8,
+}
+
+fn _PyMutex_Lock(m: *mut PyMutex) {
+    let mut expected: u8 = 0;
+    if _Py_atomic_compare_exchange_uint8(
+        unsafe { core::ptr::addr_of_mut!((*m)._bits) },
+        unsafe { &mut (*core::ptr::addr_of_mut!(expected)) },
+        1u8,
+    ) == 0
+    {
+        unsafe { PyMutex_Lock(m) };
+    }
+}
+
+fn _PyMutex_Unlock(m: *mut PyMutex) {
+    let mut expected: u8 = 1;
+    if _Py_atomic_compare_exchange_uint8(
+        unsafe { core::ptr::addr_of_mut!((*m)._bits) },
+        unsafe { &mut (*core::ptr::addr_of_mut!(expected)) },
+        0u8,
+    ) == 0
+    {
+        unsafe { PyMutex_Unlock(m) };
+    }
+}
+
+fn _PyMutex_IsLocked(m: *mut PyMutex) -> i32 {
+    ((_Py_atomic_load_uint8((unsafe { core::ptr::addr_of_mut!((*m)._bits) }) as *const u8) as i32)
+        & 1
+        != 0) as i32
+}
+
+// PyObject_VAR_HEAD defines the initial segment of all variable-size
+// container objects.  These end with a declaration of an array with 1
+// element, but enough space is malloc'ed so that the array actually
+// has room for ob_size elements.  Note that ob_size is an element count,
+// not necessarily a byte count.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _object {
+    __slate_anon_0: __SlateRecord_object_h_122,
+    ob_type: *mut _typeobject,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _frame {}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_object_h_172 {
+    ob_base: _object,
+    ob_size: i64,
+}
+
+fn _Py_TYPE(ob: *mut _object) -> *mut _typeobject {
+    unsafe { (*ob).ob_type }
+}
+
+fn Py_SIZE(ob: *mut _object) -> i64 {
+    unsafe { (*_PyVarObject_CAST!(ob)).ob_size }
+}
+
+fn Py_IS_TYPE(ob: *mut _object, r#type: *mut _typeobject) -> i32 {
+    (Py_TYPE!(ob) == r#type) as i32
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_object_h_122 {
+    ob_refcnt_full: i64,
+    __slate_anon_1: __SlateRecord_object_h_125,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_object_h_125 {
+    ob_refcnt: u32,
+    ob_overflow: u16,
+    ob_flags: u16,
+}
+
+fn PyObject_TypeCheck(ob: *mut _object, r#type: *mut _typeobject) -> i32 {
+    let __v0: bool =
+        Py_IS_TYPE!(ob, r#type) != 0 || (unsafe { PyType_IsSubtype(Py_TYPE!(ob), r#type) }) != 0;
+    __v0 as i32
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_object_h_106 {
+    nb_add: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_subtract: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_multiply: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_remainder: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_divmod: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_power: Option<
+        unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut _object) -> *mut _object,
+    >,
+    nb_negative: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    nb_positive: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    nb_absolute: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    nb_bool: Option<unsafe extern "C-unwind" fn(*mut _object) -> i32>,
+    nb_invert: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    nb_lshift: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_rshift: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_and: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_xor: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_or: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_int: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    nb_reserved: *mut (),
+    nb_float: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    nb_inplace_add: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_subtract:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_multiply:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_remainder:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_power: Option<
+        unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut _object) -> *mut _object,
+    >,
+    nb_inplace_lshift:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_rshift:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_and: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_xor: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_or: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_floor_divide:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_true_divide: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_floor_divide:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_true_divide:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_index: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    nb_matrix_multiply:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    nb_inplace_matrix_multiply:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_object_h_120 {
+    sq_length: Option<unsafe extern "C-unwind" fn(*mut _object) -> i64>,
+    sq_concat: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    sq_repeat: Option<unsafe extern "C-unwind" fn(*mut _object, i64) -> *mut _object>,
+    sq_item: Option<unsafe extern "C-unwind" fn(*mut _object, i64) -> *mut _object>,
+    was_sq_slice: *mut (),
+    sq_ass_item: Option<unsafe extern "C-unwind" fn(*mut _object, i64, *mut _object) -> i32>,
+    was_sq_ass_slice: *mut (),
+    sq_contains: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> i32>,
+    sq_inplace_concat:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    sq_inplace_repeat: Option<unsafe extern "C-unwind" fn(*mut _object, i64) -> *mut _object>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_object_h_126 {
+    mp_length: Option<unsafe extern "C-unwind" fn(*mut _object) -> i64>,
+    mp_subscript: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    mp_ass_subscript:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut _object) -> i32>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_object_h_135 {
+    am_await: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    am_aiter: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    am_anext: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    am_send:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut *mut _object) -> i32>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_object_h_140 {
+    bf_getbuffer: Option<
+        unsafe extern "C-unwind" fn(*mut _object, *mut __SlateRecord_pybuffer_h_33, i32) -> i32,
+    >,
+    bf_releasebuffer:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut __SlateRecord_pybuffer_h_33)>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _typeobject {
+    ob_base: __SlateRecord_object_h_172,
+    tp_name: *const i8,
+    tp_basicsize: i64,
+    tp_itemsize: i64,
+    tp_dealloc: Option<unsafe extern "C-unwind" fn(*mut _object)>,
+    tp_vectorcall_offset: i64,
+    tp_getattr: Option<unsafe extern "C-unwind" fn(*mut _object, *mut i8) -> *mut _object>,
+    tp_setattr: Option<unsafe extern "C-unwind" fn(*mut _object, *mut i8, *mut _object) -> i32>,
+    tp_as_async: *mut __SlateRecord_object_h_135,
+    tp_repr: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    tp_as_number: *mut __SlateRecord_object_h_106,
+    tp_as_sequence: *mut __SlateRecord_object_h_120,
+    tp_as_mapping: *mut __SlateRecord_object_h_126,
+    tp_hash: Option<unsafe extern "C-unwind" fn(*mut _object) -> i64>,
+    tp_call: Option<
+        unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut _object) -> *mut _object,
+    >,
+    tp_str: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    tp_getattro: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    tp_setattro:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut _object) -> i32>,
+    tp_as_buffer: *mut __SlateRecord_object_h_140,
+    tp_flags: u64,
+    tp_doc: *const i8,
+    tp_traverse: Option<
+        unsafe extern "C-unwind" fn(
+            *mut _object,
+            Option<unsafe extern "C-unwind" fn(*mut _object, *mut ()) -> i32>,
+            *mut (),
+        ) -> i32,
+    >,
+    tp_clear: Option<unsafe extern "C-unwind" fn(*mut _object) -> i32>,
+    tp_richcompare:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object, i32) -> *mut _object>,
+    tp_weaklistoffset: i64,
+    tp_iter: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    tp_iternext: Option<unsafe extern "C-unwind" fn(*mut _object) -> *mut _object>,
+    tp_methods: *mut PyMethodDef,
+    tp_members: *mut PyMemberDef,
+    tp_getset: *mut PyGetSetDef,
+    tp_base: *mut _typeobject,
+    tp_dict: *mut _object,
+    tp_descr_get: Option<
+        unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut _object) -> *mut _object,
+    >,
+    tp_descr_set:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut _object) -> i32>,
+    tp_dictoffset: i64,
+    tp_init: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut _object) -> i32>,
+    tp_alloc: Option<unsafe extern "C-unwind" fn(*mut _typeobject, i64) -> *mut _object>,
+    tp_new: Option<
+        unsafe extern "C-unwind" fn(*mut _typeobject, *mut _object, *mut _object) -> *mut _object,
+    >,
+    tp_free: Option<unsafe extern "C-unwind" fn(*mut ())>,
+    tp_is_gc: Option<unsafe extern "C-unwind" fn(*mut _object) -> i32>,
+    tp_bases: *mut _object,
+    tp_mro: *mut _object,
+    tp_cache: *mut _object,
+    tp_subclasses: *mut (),
+    tp_weaklist: *mut _object,
+    tp_del: Option<unsafe extern "C-unwind" fn(*mut _object)>,
+    tp_version_tag: u32,
+    tp_finalize: Option<unsafe extern "C-unwind" fn(*mut _object)>,
+    tp_vectorcall: Option<
+        unsafe extern "C-unwind" fn(
+            *mut _object,
+            *const *mut _object,
+            u64,
+            *mut _object,
+        ) -> *mut _object,
+    >,
+    tp_watched: u8,
+    tp_versions_used: u16,
+}
+
+// Track types initialized using _PyStaticType_InitBuiltin().
+// Define a pair of assertion macros:
+// _PyObject_ASSERT_FROM(), _PyObject_ASSERT_WITH_MSG() and _PyObject_ASSERT().
+//
+// These work like the regular C assert(), in that they will abort the
+// process with a message on stderr if the given condition fails to hold,
+// but compile away to nothing if NDEBUG is defined.
+//
+// However, before aborting, Python will also try to call _PyObject_Dump() on
+// the given object.  This may be of use when investigating bugs in which a
+// particular object is corrupt (e.g. buggy a tp_visit method in an extension
+// module breaking the garbage collector), to help locate the broken objects.
+//
+// The WITH_MSG variant allows you to supply an additional message that Python
+// will attempt to print to stderr, after the object dump.
+//
+// No debugging: compile away the assertions:
+fn PyType_HasFeature(r#type: *mut _typeobject, feature: u64) -> i32 {
+    let flags: u64 = unsafe { (*r#type).tp_flags };
+    (flags & feature != 0) as i32
+}
+
+fn _Py_REFCNT(ob: *mut _object) -> i64 {
+    (unsafe { (*ob).__slate_anon_0.__slate_anon_1.ob_refcnt }) as i64
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_unicodeobject_h_163_2 {
+    __slate_bits_0: __slate_bits::__SlateBits139U0,
+}
+
+#[inline(always)]
+fn _Py_IsImmortal(op: *mut _object) -> i32 {
+    (_Py_CAST!(i32, unsafe {
+        (*op).__slate_anon_0.__slate_anon_1.ob_refcnt
+    }) < 0) as i32
+}
+
+#[inline(always)]
+fn Py_INCREF(op: *mut _object) {
+    // Non-limited C API and limited C API for Python 3.9 and older access
+    //
+    // directly PyObject.ob_refcnt.
+    let cur_refcnt: u32 = unsafe { (*op).__slate_anon_0.__slate_anon_1.ob_refcnt };
+    if (cur_refcnt as u64) >= 3221225472u64 {
+        // the object is immortal
+        _Py_INCREF_IMMORTAL_STAT_INC!();
+        return;
+    }
+    unsafe {
+        (*op).__slate_anon_0.__slate_anon_1.ob_refcnt = cur_refcnt.wrapping_add(1);
+    }
+    _Py_INCREF_STAT_INC!();
+}
+
+#[inline(always)]
+fn Py_DECREF(op: *mut _object) {
+    // Non-limited C API and limited C API for Python 3.9 and older access
+    //
+    // directly PyObject.ob_refcnt.
+    if _Py_IsImmortal!(op) != 0 {
+        _Py_DECREF_IMMORTAL_STAT_INC!();
+        return;
+    }
+    _Py_DECREF_STAT_INC!();
+    let __v1: u32 = unsafe { (*op).__slate_anon_0.__slate_anon_1.ob_refcnt };
+    let __v2: u32 = __v1.wrapping_sub(1);
+    unsafe {
+        (*op).__slate_anon_0.__slate_anon_1.ob_refcnt = __v2;
+    }
+    if __v2 == 0 {
+        unsafe { _Py_Dealloc(op) };
+    }
+}
+
+fn Py_XINCREF(op: *mut _object) {
+    if !op.is_null() {
+        Py_INCREF!(op);
+    }
+}
+
+fn Py_XDECREF(op: *mut _object) {
+    if !op.is_null() {
+        Py_DECREF!(op);
+    }
+}
+
+fn _Py_NewRef(obj: *mut _object) -> *mut _object {
+    Py_INCREF!(obj);
+    obj
+}
+
+fn _Py_XNewRef(obj: *mut _object) -> *mut _object {
+    Py_XINCREF!(obj);
+    obj
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_objimpl_h_68 {
+    ctx: *mut (),
+    alloc: Option<unsafe extern "C-unwind" fn(*mut (), u64) -> *mut ()>,
+    free: Option<unsafe extern "C-unwind" fn(*mut (), *mut (), u64)>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_bytesobject_h_15 {
+    ob_base: __SlateRecord_object_h_172,
+    ob_shash: i64,
+    ob_sval: [i8; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _PyExecutorObject {}
+
+fn PyBytes_AS_STRING(op: *mut _object) -> *mut i8 {
+    unsafe { (*_PyBytes_CAST!(op)).ob_sval.as_mut_ptr() as *mut i8 }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_unicodeobject_h_163 {
+    ob_base: _object,
+    length: i64,
+    hash: i64,
+    state: __SlateRecord_unicodeobject_h_163_2,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_unicodeobject_h_173 {
+    _base: __SlateRecord_unicodeobject_h_163,
+    utf8_length: i64,
+    utf8: *mut i8,
+}
+
+// PyUnicode_KIND(): Return one of the PyUnicode_*_KIND values defined above.
+//
+//
+//
+// gh-89653: Converting this macro to a static inline function would introduce
+//
+// new compiler warnings on "kind < PyUnicode_KIND(str)" (compare signed and
+//
+// unsigned numbers) where kind type is an int or on
+//
+// "unsigned int kind = PyUnicode_KIND(str)" (cast signed to unsigned).
+fn PyUnicode_GET_LENGTH(op: *mut _object) -> i64 {
+    unsafe { (*_PyASCIIObject_CAST!(op)).length }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pyerrors_h_15 {
+    ob_base: _object,
+    dict: *mut _object,
+    args: *mut _object,
+    notes: *mut _object,
+    traceback: *mut _object,
+    context: *mut _object,
+    cause: *mut _object,
+    suppress_context: i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _PyLongValue {
+    lv_tag: u64,
+    ob_digit: [u32; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _longobject {
+    ob_base: _object,
+    long_value: _PyLongValue,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_tupleobject_h_13 {
+    ob_base: __SlateRecord_object_h_172,
+    ob_hash: i64,
+    ob_item: [*mut _object; 1],
+}
+
+fn PyTuple_GET_SIZE(op: *mut _object) -> i64 {
+    let tuple: *mut __SlateRecord_tupleobject_h_13 = _PyTuple_CAST!(op);
+    Py_SIZE!(tuple)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_listobject_h_22 {
+    ob_base: __SlateRecord_object_h_172,
+    ob_item: *mut *mut _object,
+    allocated: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pystate_h_78 {
+    __slate_bits_0: __slate_bits::__SlateBits192U0,
+}
+
+fn PyList_GET_SIZE(op: *mut _object) -> i64 {
+    let list: *mut __SlateRecord_listobject_h_22 = _PyList_CAST!(op);
+    Py_SIZE!(list)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PyMethodDef {
+    ml_name: *const i8,
+    ml_meth: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+    ml_flags: i32,
+    ml_doc: *const i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PyModuleDef_Base {
+    ob_base: _object,
+    m_init: Option<unsafe extern "C-unwind" fn() -> *mut _object>,
+    m_index: i64,
+    m_copy: *mut _object,
+}
+
+// m_init
+// m_index
+// m_copy
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PyModuleDef_Slot {
+    slot: i32,
+    value: *mut (),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PyModuleDef {
+    m_base: PyModuleDef_Base,
+    m_name: *const i8,
+    m_doc: *const i8,
+    m_size: i64,
+    m_methods: *mut PyMethodDef,
+    m_slots: *mut PyModuleDef_Slot,
+    m_traverse: Option<
+        unsafe extern "C-unwind" fn(
+            *mut _object,
+            Option<unsafe extern "C-unwind" fn(*mut _object, *mut ()) -> i32>,
+            *mut (),
+        ) -> i32,
+    >,
+    m_clear: Option<unsafe extern "C-unwind" fn(*mut _object) -> i32>,
+    m_free: Option<unsafe extern "C-unwind" fn(*mut ())>,
+}
+
+// NULL or a tuple
+// NULL or a dict
+// NULL or a tuple of cell objects
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_funcobject_h_62 {
+    ob_base: _object,
+    func_globals: *mut _object,
+    func_builtins: *mut _object,
+    func_name: *mut _object,
+    func_qualname: *mut _object,
+    func_code: *mut _object,
+    func_defaults: *mut _object,
+    func_kwdefaults: *mut _object,
+    func_closure: *mut _object,
+    func_doc: *mut _object,
+    func_dict: *mut _object,
+    func_weakreflist: *mut _object,
+    func_module: *mut _object,
+    func_annotations: *mut _object,
+    func_annotate: *mut _object,
+    func_typeparams: *mut _object,
+    vectorcall: Option<
+        unsafe extern "C-unwind" fn(
+            *mut _object,
+            *const *mut _object,
+            u64,
+            *mut _object,
+        ) -> *mut _object,
+    >,
+    func_version: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_code_h_16 {
+    _co_code: *mut _object,
+    _co_varnames: *mut _object,
+    _co_cellvars: *mut _object,
+    _co_freevars: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_code_h_22 {
+    size: i32,
+    capacity: i32,
+    executors: [*mut _PyExecutorObject; 1],
+}
+
+// To avoid repeating ourselves in deepfreeze.py, all PyCodeObject members are
+//
+// defined in this macro:
+// Note only the following fields are used in hash and/or comparisons           *                                                                              * - co_name                                                                    * - co_argcount                                                                * - co_posonlyargcount                                                         * - co_kwonlyargcount                                                          * - co_nlocals                                                                 * - co_stacksize                                                               * - co_flags                                                                   * - co_firstlineno                                                             * - co_consts                                                                  * - co_names                                                                   * - co_localsplusnames                                                         * This is done to preserve the name and line number for tracebacks             * and debuggers; otherwise, constant de-duplication would collapse             * identical functions/lambdas defined on different lines.
+// These fields are set with provided values on new code objects.
+// The hottest fields (in the eval loop) are grouped here at the top.
+// list (constants used)
+// list of strings (names used)
+// Byte string encoding exception handling                                        table
+// CO_..., see below
+// The rest are not so impactful on performance.
+// #arguments, except *args
+// #positional only arguments
+// #keyword only arguments
+// #entries needed for evaluation stack
+// first source line number
+// redundant values (derived from co_localsplusnames and                          co_localspluskinds)
+// number of spaces for holding local, cell,                                      and free variables
+// Size of frame in words
+// number of local variables
+// total number of cell variables
+// number of free variables
+// version number
+// tuple mapping offsets to names
+// Bytes mapping to local kinds (one byte                                         per variable)
+// unicode (where it was loaded from)
+// unicode (name, for reference)
+// unicode (qualname, for reference)
+// bytes object that holds location info
+// to support weakrefs to code objects
+// executors from optimizer
+// cached co_* attributes
+// current instrumentation version
+// Monitoring data
+// ID used for per-thread refcounting
+// index of first traceable instruction
+// Scratch space for extra data relating to the code object.                      Type is a void* to keep the format private in codeobject.c to force            people to go through the proper APIs.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PyCodeObject {
+    ob_base: __SlateRecord_object_h_172,
+    co_consts: *mut _object,
+    co_names: *mut _object,
+    co_exceptiontable: *mut _object,
+    co_flags: i32,
+    co_argcount: i32,
+    co_posonlyargcount: i32,
+    co_kwonlyargcount: i32,
+    co_stacksize: i32,
+    co_firstlineno: i32,
+    co_nlocalsplus: i32,
+    co_framesize: i32,
+    co_nlocals: i32,
+    co_ncellvars: i32,
+    co_nfreevars: i32,
+    co_version: u32,
+    co_localsplusnames: *mut _object,
+    co_localspluskinds: *mut _object,
+    co_filename: *mut _object,
+    co_name: *mut _object,
+    co_qualname: *mut _object,
+    co_linetable: *mut _object,
+    co_weakreflist: *mut _object,
+    co_executors: *mut __SlateRecord_code_h_22,
+    _co_cached: *mut __SlateRecord_code_h_16,
+    _co_instrumentation_version: u64,
+    _co_monitoring: *mut _PyCoMonitoringData,
+    _co_unique_id: i64,
+    _co_firsttraceable: i32,
+    co_extra: *mut (),
+    co_code_adaptive: [i8; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _traceback {
+    ob_base: _object,
+    tb_next: *mut _traceback,
+    tb_frame: *mut _frame,
+    tb_lasti: i32,
+    tb_lineno: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_structs_h_32_2 {
+    code: u8,
+    arg: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_initconfig_h_19 {
+    _type: u32,
+    func: *const i8,
+    err_msg: *const i8,
+    exitcode: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_initconfig_h_36 {
+    length: i64,
+    items: *mut *mut i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PyPreConfig {
+    _config_init: i32,
+    parse_argv: i32,
+    isolated: i32,
+    use_environment: i32,
+    configure_locale: i32,
+    coerce_c_locale: i32,
+    coerce_c_locale_warn: i32,
+    utf8_mode: i32,
+    dev_mode: i32,
+    allocator: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PyConfig {
+    _config_init: i32,
+    isolated: i32,
+    use_environment: i32,
+    dev_mode: i32,
+    install_signal_handlers: i32,
+    use_hash_seed: i32,
+    hash_seed: u64,
+    faulthandler: i32,
+    tracemalloc: i32,
+    perf_profiling: i32,
+    remote_debug: i32,
+    import_time: i32,
+    code_debug_ranges: i32,
+    show_ref_count: i32,
+    dump_refs: i32,
+    dump_refs_file: *mut i32,
+    malloc_stats: i32,
+    filesystem_encoding: *mut i32,
+    filesystem_errors: *mut i32,
+    pycache_prefix: *mut i32,
+    parse_argv: i32,
+    orig_argv: __SlateRecord_initconfig_h_36,
+    argv: __SlateRecord_initconfig_h_36,
+    xoptions: __SlateRecord_initconfig_h_36,
+    warnoptions: __SlateRecord_initconfig_h_36,
+    site_import: i32,
+    bytes_warning: i32,
+    warn_default_encoding: i32,
+    inspect: i32,
+    interactive: i32,
+    optimization_level: i32,
+    parser_debug: i32,
+    write_bytecode: i32,
+    verbose: i32,
+    quiet: i32,
+    user_site_directory: i32,
+    configure_c_stdio: i32,
+    buffered_stdio: i32,
+    stdio_encoding: *mut i32,
+    stdio_errors: *mut i32,
+    check_hash_pycs_mode: *mut i32,
+    use_frozen_modules: i32,
+    safe_path: i32,
+    int_max_str_digits: i32,
+    thread_inherit_context: i32,
+    context_aware_warnings: i32,
+    cpu_count: i32,
+    pathconfig_warnings: i32,
+    program_name: *mut i32,
+    pythonpath_env: *mut i32,
+    home: *mut i32,
+    platlibdir: *mut i32,
+    module_search_paths_set: i32,
+    module_search_paths: __SlateRecord_initconfig_h_36,
+    stdlib_dir: *mut i32,
+    executable: *mut i32,
+    base_executable: *mut i32,
+    prefix: *mut i32,
+    base_prefix: *mut i32,
+    exec_prefix: *mut i32,
+    base_exec_prefix: *mut i32,
+    skip_source_first_line: i32,
+    run_command: *mut i32,
+    run_module: *mut i32,
+    run_filename: *mut i32,
+    sys_path_0: *mut i32,
+    _install_importlib: i32,
+    _init_main: i32,
+    _is_python_build: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pystate_h_35 {
+    debugger_pending_call: i32,
+    debugger_script_path: [i8; 512],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _err_stackitem {
+    exc_value: *mut _object,
+    previous_item: *mut _err_stackitem,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _stack_chunk {
+    previous: *mut _stack_chunk,
+    size: u64,
+    top: u64,
+    data: [*mut _object; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _ts {
+    prev: *mut _ts,
+    next: *mut _ts,
+    interp: *mut _is,
+    eval_breaker: u64,
+    _status: __SlateRecord_pystate_h_78,
+    holds_gil: i32,
+    _whence: i32,
+    state: i32,
+    py_recursion_remaining: i32,
+    py_recursion_limit: i32,
+    recursion_headroom: i32,
+    tracing: i32,
+    what_event: i32,
+    current_frame: *mut _PyInterpreterFrame,
+    c_profilefunc:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _frame, i32, *mut _object) -> i32>,
+    c_tracefunc:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _frame, i32, *mut _object) -> i32>,
+    c_profileobj: *mut _object,
+    c_traceobj: *mut _object,
+    current_exception: *mut _object,
+    exc_info: *mut _err_stackitem,
+    dict: *mut _object,
+    gilstate_counter: i32,
+    async_exc: *mut _object,
+    thread_id: u64,
+    native_thread_id: u64,
+    delete_later: *mut _object,
+    critical_section: u64,
+    coroutine_origin_tracking_depth: i32,
+    async_gen_firstiter: *mut _object,
+    async_gen_finalizer: *mut _object,
+    context: *mut _object,
+    context_ver: u64,
+    id: u64,
+    datastack_chunk: *mut _stack_chunk,
+    datastack_top: *mut *mut _object,
+    datastack_limit: *mut *mut _object,
+    exc_state: _err_stackitem,
+    current_executor: *mut _object,
+    dict_global_version: u64,
+    threading_local_key: *mut _object,
+    threading_local_sentinel: *mut _object,
+    remote_debugger_support: __SlateRecord_pystate_h_35,
+    datastack_cached_chunk: *mut _stack_chunk,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PyGetSetDef {
+    name: *const i8,
+    get: Option<unsafe extern "C-unwind" fn(*mut _object, *mut ()) -> *mut _object>,
+    set: Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut ()) -> i32>,
+    doc: *const i8,
+    closure: *mut (),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PyMemberDef {
+    name: *const i8,
+    r#type: i32,
+    offset: i64,
+    flags: i32,
+    doc: *const i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct wrapperbase {
+    name: *const i8,
+    offset: i32,
+    function: *mut (),
+    wrapper:
+        Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object, *mut ()) -> *mut _object>,
+    doc: *const i8,
+    flags: i32,
+    name_strobj: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _PyWeakReference {
+    ob_base: _object,
+    wr_object: *mut _object,
+    wr_callback: *mut _object,
+    hash: i64,
+    wr_prev: *mut _PyWeakReference,
+    wr_next: *mut _PyWeakReference,
+    vectorcall: Option<
+        unsafe extern "C-unwind" fn(
+            *mut _object,
+            *const *mut _object,
+            u64,
+            *mut _object,
+        ) -> *mut _object,
+    >,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_tss_t {
+    _is_initialized: i32,
+    _key: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_modsupport_h_9 {
+    v: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _PyArg_Parser {
+    format: *const i8,
+    keywords: *const *const i8,
+    fname: *const i8,
+    custom_msg: *const i8,
+    once: __SlateRecord_modsupport_h_9,
+    is_kwtuple_owned: i32,
+    pos: i32,
+    min: i32,
+    max: i32,
+    kwtuple: *mut _object,
+    next: *mut _PyArg_Parser,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _inittab {
+    name: *const i8,
+    initfunc: Option<unsafe extern "C-unwind" fn() -> *mut _object>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _frozen {
+    name: *const i8,
+    code: *const u8,
+    size: i32,
+    is_package: i32,
+}
+
+fn PyObject_CallMethodOneArg(
+    self_: *mut _object,
+    name: *mut _object,
+    arg: *mut _object,
+) -> *mut _object {
+    let mut args: __SlateAlign16<[*mut _object; 2]> = __SlateAlign16([self_, arg]);
+    let nargsf: u64 = 2 | _Py_STATIC_CAST!(u64, 1i32)
+        << 8u64
+            .wrapping_mul(core::mem::size_of::<u64>() as u64)
+            .wrapping_sub(1);
+    unsafe {
+        PyObject_VectorcallMethod(
+            name,
+            args.0.as_mut_ptr() as *const *mut _object,
+            nargsf,
+            core::ptr::null_mut::<_object>(),
+        )
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_AuditHookEntry {
+    next: *mut _Py_AuditHookEntry,
+    hookCFunction: Option<unsafe extern "C-unwind" fn(*const i8, *mut _object, *mut ()) -> i32>,
+    userData: *mut (),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct code_arena_st {}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_structs_h_15 {
+    value_and_backoff: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_pycore_structs_h_32 {
+    cache: u16,
+    op: __SlateRecord_pycore_structs_h_32_2,
+    counter: __SlateRecord_pycore_structs_h_15,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_interp_structs_h_81 {
+    status: i32,
+    perf_trampoline_type: i32,
+    extra_code_index: i64,
+    code_arena: *mut code_arena_st,
+    trampoline_api: trampoline_api_st,
+    map_file: *mut slate_support::FILE,
+    persist_after_fork: i64,
+    prev_eval_frame: Option<
+        unsafe extern "C-unwind" fn(*mut _ts, *mut _PyInterpreterFrame, i32) -> *mut _object,
+    >,
+    trampoline_refcount: i64,
+    code_watcher_id: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_structs_h_38 {
+    ob_base: _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_structs_h_47 {
+    ob_base: _object,
+    h_root: *mut __SlateRecord_pycore_structs_h_38,
+    h_weakreflist: *mut _object,
+    h_count: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_structs_h_53 {
+    ob_base: __SlateRecord_object_h_172,
+    b_bitmap: u32,
+    b_array: [*mut _object; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_context_h_21 {
+    ob_base: _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union _PyStackRef {
+    bits: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct llist_node {
+    next: *mut llist_node,
+    prev: *mut llist_node,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_freelist {
+    freelist: *mut (),
+    size: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_freelists {
+    floats: _Py_freelist,
+    ints: _Py_freelist,
+    tuples: [_Py_freelist; 20],
+    lists: _Py_freelist,
+    list_iters: _Py_freelist,
+    tuple_iters: _Py_freelist,
+    dicts: _Py_freelist,
+    dictkeys: _Py_freelist,
+    slices: _Py_freelist,
+    ranges: _Py_freelist,
+    range_iters: _Py_freelist,
+    contexts: _Py_freelist,
+    async_gens: _Py_freelist,
+    async_gen_asends: _Py_freelist,
+    futureiters: _Py_freelist,
+    object_stack_chunks: _Py_freelist,
+    unicode_writers: _Py_freelist,
+    pycfunctionobject: _Py_freelist,
+    pycmethodobject: _Py_freelist,
+    pymethodobjects: _Py_freelist,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _qsbr_thread_state {
+    seq: u64,
+    shared: *mut _qsbr_shared,
+    tstate: *mut _ts,
+    deferred_count: i32,
+    deferred_memory: u64,
+    deferred_page_memory: u64,
+    should_process: bool,
+    allocated: bool,
+    freelist_next: *mut _qsbr_thread_state,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _qsbr_pad {
+    qsbr: _qsbr_thread_state,
+    __padding: [i8; 0],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_pythread_h_64 {
+    ptr: *mut __SlateRecord_pthreadtypes_h_45,
+    val: __SlateRecord_pthreadtypes_h_45,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _qsbr_shared {
+    wr_seq: u64,
+    rd_seq: u64,
+    array: *mut _qsbr_pad,
+    array_raw: *mut (),
+    size: i64,
+    mutex: PyMutex,
+    freelist: *mut _qsbr_thread_state,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_interp_structs_h_297 {
+    mutex: PyMutex,
+    hashtable: *mut _Py_hashtable_t,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _PyThreadStateImpl {
+    base: _ts,
+    refcount: i64,
+    c_stack_top: u64,
+    c_stack_soft_limit: u64,
+    c_stack_hard_limit: u64,
+    asyncio_running_loop: *mut _object,
+    asyncio_running_task: *mut _object,
+    asyncio_tasks_head: llist_node,
+    qsbr: *mut _qsbr_thread_state,
+    mem_free_queue: llist_node,
+    c_stack_init_base: u64,
+    c_stack_init_top: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_lock_h_69 {
+    v: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_interp_structs_h_348 {
+    import_level: i32,
+    accumulated: i64,
+    header: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_lock_h_153 {
+    mutex: PyMutex,
+    thread: u64,
+    level: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_lock_h_189 {
+    bits: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ast_state {
+    once: __SlateRecord_modsupport_h_9,
+    finalized: i32,
+    AST_type: *mut _object,
+    Add_singleton: *mut _object,
+    Add_type: *mut _object,
+    And_singleton: *mut _object,
+    And_type: *mut _object,
+    AnnAssign_type: *mut _object,
+    Assert_type: *mut _object,
+    Assign_type: *mut _object,
+    AsyncFor_type: *mut _object,
+    AsyncFunctionDef_type: *mut _object,
+    AsyncWith_type: *mut _object,
+    Attribute_type: *mut _object,
+    AugAssign_type: *mut _object,
+    Await_type: *mut _object,
+    BinOp_type: *mut _object,
+    BitAnd_singleton: *mut _object,
+    BitAnd_type: *mut _object,
+    BitOr_singleton: *mut _object,
+    BitOr_type: *mut _object,
+    BitXor_singleton: *mut _object,
+    BitXor_type: *mut _object,
+    BoolOp_type: *mut _object,
+    Break_type: *mut _object,
+    Call_type: *mut _object,
+    ClassDef_type: *mut _object,
+    Compare_type: *mut _object,
+    Constant_type: *mut _object,
+    Continue_type: *mut _object,
+    Del_singleton: *mut _object,
+    Del_type: *mut _object,
+    Delete_type: *mut _object,
+    DictComp_type: *mut _object,
+    Dict_type: *mut _object,
+    Div_singleton: *mut _object,
+    Div_type: *mut _object,
+    Eq_singleton: *mut _object,
+    Eq_type: *mut _object,
+    ExceptHandler_type: *mut _object,
+    Expr_type: *mut _object,
+    Expression_type: *mut _object,
+    FloorDiv_singleton: *mut _object,
+    FloorDiv_type: *mut _object,
+    For_type: *mut _object,
+    FormattedValue_type: *mut _object,
+    FunctionDef_type: *mut _object,
+    FunctionType_type: *mut _object,
+    GeneratorExp_type: *mut _object,
+    Global_type: *mut _object,
+    GtE_singleton: *mut _object,
+    GtE_type: *mut _object,
+    Gt_singleton: *mut _object,
+    Gt_type: *mut _object,
+    IfExp_type: *mut _object,
+    If_type: *mut _object,
+    ImportFrom_type: *mut _object,
+    Import_type: *mut _object,
+    In_singleton: *mut _object,
+    In_type: *mut _object,
+    Interactive_type: *mut _object,
+    Interpolation_type: *mut _object,
+    Invert_singleton: *mut _object,
+    Invert_type: *mut _object,
+    IsNot_singleton: *mut _object,
+    IsNot_type: *mut _object,
+    Is_singleton: *mut _object,
+    Is_type: *mut _object,
+    JoinedStr_type: *mut _object,
+    LShift_singleton: *mut _object,
+    LShift_type: *mut _object,
+    Lambda_type: *mut _object,
+    ListComp_type: *mut _object,
+    List_type: *mut _object,
+    Load_singleton: *mut _object,
+    Load_type: *mut _object,
+    LtE_singleton: *mut _object,
+    LtE_type: *mut _object,
+    Lt_singleton: *mut _object,
+    Lt_type: *mut _object,
+    MatMult_singleton: *mut _object,
+    MatMult_type: *mut _object,
+    MatchAs_type: *mut _object,
+    MatchClass_type: *mut _object,
+    MatchMapping_type: *mut _object,
+    MatchOr_type: *mut _object,
+    MatchSequence_type: *mut _object,
+    MatchSingleton_type: *mut _object,
+    MatchStar_type: *mut _object,
+    MatchValue_type: *mut _object,
+    Match_type: *mut _object,
+    Mod_singleton: *mut _object,
+    Mod_type: *mut _object,
+    Module_type: *mut _object,
+    Mult_singleton: *mut _object,
+    Mult_type: *mut _object,
+    Name_type: *mut _object,
+    NamedExpr_type: *mut _object,
+    Nonlocal_type: *mut _object,
+    NotEq_singleton: *mut _object,
+    NotEq_type: *mut _object,
+    NotIn_singleton: *mut _object,
+    NotIn_type: *mut _object,
+    Not_singleton: *mut _object,
+    Not_type: *mut _object,
+    Or_singleton: *mut _object,
+    Or_type: *mut _object,
+    ParamSpec_type: *mut _object,
+    Pass_type: *mut _object,
+    Pow_singleton: *mut _object,
+    Pow_type: *mut _object,
+    RShift_singleton: *mut _object,
+    RShift_type: *mut _object,
+    Raise_type: *mut _object,
+    Return_type: *mut _object,
+    SetComp_type: *mut _object,
+    Set_type: *mut _object,
+    Slice_type: *mut _object,
+    Starred_type: *mut _object,
+    Store_singleton: *mut _object,
+    Store_type: *mut _object,
+    Sub_singleton: *mut _object,
+    Sub_type: *mut _object,
+    Subscript_type: *mut _object,
+    TemplateStr_type: *mut _object,
+    TryStar_type: *mut _object,
+    Try_type: *mut _object,
+    Tuple_type: *mut _object,
+    TypeAlias_type: *mut _object,
+    TypeIgnore_type: *mut _object,
+    TypeVarTuple_type: *mut _object,
+    TypeVar_type: *mut _object,
+    UAdd_singleton: *mut _object,
+    UAdd_type: *mut _object,
+    USub_singleton: *mut _object,
+    USub_type: *mut _object,
+    UnaryOp_type: *mut _object,
+    While_type: *mut _object,
+    With_type: *mut _object,
+    YieldFrom_type: *mut _object,
+    Yield_type: *mut _object,
+    __dict__: *mut _object,
+    __doc__: *mut _object,
+    __match_args__: *mut _object,
+    __module__: *mut _object,
+    _attributes: *mut _object,
+    _fields: *mut _object,
+    alias_type: *mut _object,
+    annotation: *mut _object,
+    arg: *mut _object,
+    arg_type: *mut _object,
+    args: *mut _object,
+    argtypes: *mut _object,
+    arguments_type: *mut _object,
+    asname: *mut _object,
+    ast: *mut _object,
+    attr: *mut _object,
+    bases: *mut _object,
+    body: *mut _object,
+    boolop_type: *mut _object,
+    bound: *mut _object,
+    cases: *mut _object,
+    cause: *mut _object,
+    cls: *mut _object,
+    cmpop_type: *mut _object,
+    col_offset: *mut _object,
+    comparators: *mut _object,
+    comprehension_type: *mut _object,
+    context_expr: *mut _object,
+    conversion: *mut _object,
+    ctx: *mut _object,
+    decorator_list: *mut _object,
+    default_value: *mut _object,
+    defaults: *mut _object,
+    elt: *mut _object,
+    elts: *mut _object,
+    end_col_offset: *mut _object,
+    end_lineno: *mut _object,
+    exc: *mut _object,
+    excepthandler_type: *mut _object,
+    expr_context_type: *mut _object,
+    expr_type: *mut _object,
+    finalbody: *mut _object,
+    format_spec: *mut _object,
+    func: *mut _object,
+    generators: *mut _object,
+    guard: *mut _object,
+    handlers: *mut _object,
+    id: *mut _object,
+    ifs: *mut _object,
+    is_async: *mut _object,
+    items: *mut _object,
+    iter: *mut _object,
+    key: *mut _object,
+    keys: *mut _object,
+    keyword_type: *mut _object,
+    keywords: *mut _object,
+    kind: *mut _object,
+    kw_defaults: *mut _object,
+    kwarg: *mut _object,
+    kwd_attrs: *mut _object,
+    kwd_patterns: *mut _object,
+    kwonlyargs: *mut _object,
+    left: *mut _object,
+    level: *mut _object,
+    lineno: *mut _object,
+    lower: *mut _object,
+    match_case_type: *mut _object,
+    mod_type: *mut _object,
+    module: *mut _object,
+    msg: *mut _object,
+    name: *mut _object,
+    names: *mut _object,
+    op: *mut _object,
+    operand: *mut _object,
+    operator_type: *mut _object,
+    ops: *mut _object,
+    optional_vars: *mut _object,
+    orelse: *mut _object,
+    pattern: *mut _object,
+    pattern_type: *mut _object,
+    patterns: *mut _object,
+    posonlyargs: *mut _object,
+    rest: *mut _object,
+    returns: *mut _object,
+    right: *mut _object,
+    simple: *mut _object,
+    slice: *mut _object,
+    step: *mut _object,
+    stmt_type: *mut _object,
+    str: *mut _object,
+    subject: *mut _object,
+    tag: *mut _object,
+    target: *mut _object,
+    targets: *mut _object,
+    test: *mut _object,
+    r#type: *mut _object,
+    type_comment: *mut _object,
+    type_ignore_type: *mut _object,
+    type_ignores: *mut _object,
+    type_param_type: *mut _object,
+    type_params: *mut _object,
+    unaryop_type: *mut _object,
+    upper: *mut _object,
+    value: *mut _object,
+    values: *mut _object,
+    vararg: *mut _object,
+    withitem_type: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _pending_call {
+    func: Option<unsafe extern "C-unwind" fn(*mut ()) -> i32>,
+    arg: *mut (),
+    flags: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _pending_calls {
+    handling_thread: *mut _ts,
+    mutex: PyMutex,
+    npending: i32,
+    max: i32,
+    maxloop: i32,
+    calls: [_pending_call; 300],
+    first: i32,
+    next: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct trampoline_api_st {
+    init_state: Option<unsafe extern "C-unwind" fn() -> *mut ()>,
+    write_state: Option<unsafe extern "C-unwind" fn(*mut (), *const (), u32, *mut PyCodeObject)>,
+    free_state: Option<unsafe extern "C-unwind" fn(*mut ()) -> i32>,
+    state: *mut (),
+    code_padding: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _ceval_runtime_state {
+    perf: __SlateRecord_pycore_interp_structs_h_81,
+    pending_mainthread: _pending_calls,
+    unused_sys_trace_profile_mutex: PyMutex,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _ceval_state {
+    instrumentation_version: u64,
+    recursion_limit: i32,
+    gil: *mut _gil_runtime_state,
+    own_gil: i32,
+    pending: _pending_calls,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _atexit_runtime_state {
+    mutex: PyMutex,
+    callbacks: [Option<unsafe extern "C-unwind" fn()>; 32],
+    ncallbacks: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct atexit_callback {
+    func: Option<unsafe extern "C-unwind" fn(*mut ())>,
+    data: *mut (),
+    next: *mut atexit_callback,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct atexit_state {
+    ll_callbacks: *mut atexit_callback,
+    callbacks: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_interp_structs_h_170 {
+    _gc_next: u64,
+    _gc_prev: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct gc_generation {
+    head: __SlateRecord_pycore_interp_structs_h_170,
+    threshold: i32,
+    count: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct gc_generation_stats {
+    collections: i64,
+    collected: i64,
+    uncollectable: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct xi_exceptions {
+    PyExc_InterpreterError: *mut _object,
+    PyExc_InterpreterNotFoundError: *mut _object,
+    PyExc_NotShareableError: *mut _object,
+}
+
+// If we change this, we need to change the default value in the
+// signature of gc.collect.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _gc_runtime_state {
+    trash_delete_later: *mut _object,
+    trash_delete_nesting: i32,
+    enabled: i32,
+    debug: i32,
+    generations: [gc_generation; 3],
+    permanent_generation: gc_generation,
+    generation_stats: [gc_generation_stats; 3],
+    collecting: i32,
+    garbage: *mut _object,
+    callbacks: *mut _object,
+    heap_size: i64,
+    dummy1: i64,
+    dummy2: i32,
+    dummy3: i32,
+    long_lived_total: i64,
+    long_lived_pending: i64,
+    generation0: *mut __SlateRecord_pycore_interp_structs_h_170,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _pythread_runtime_state {
+    initialized: i32,
+    _condattr_monotonic: __SlateRecord_pycore_pythread_h_64,
+    handles: llist_node,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _gil_runtime_state {
+    interval: u64,
+    last_holder: *mut _ts,
+    locked: i32,
+    switch_number: u64,
+    cond: __SlateRecord_pthreadtypes_h_80,
+    mutex: __SlateRecord_pthreadtypes_h_72,
+    switch_cond: __SlateRecord_pthreadtypes_h_80,
+    switch_mutex: __SlateRecord_pthreadtypes_h_72,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _import_runtime_state {
+    inittab: *mut _inittab,
+    last_module_index: i64,
+    extensions: __SlateRecord_pycore_interp_structs_h_297,
+    pkgcontext: *const i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _import_state {
+    modules: *mut _object,
+    modules_by_index: *mut _object,
+    importlib: *mut _object,
+    override_frozen_modules: i32,
+    override_multi_interp_extensions_check: i32,
+    dlopenflags: i32,
+    import_func: *mut _object,
+    lock: __SlateRecord_pycore_lock_h_153,
+    find_and_load: __SlateRecord_pycore_interp_structs_h_348,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_slist_item_s {
+    next: *mut _Py_slist_item_s,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_hashtable_h_19 {
+    head: *mut _Py_slist_item_s,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_hashtable_h_35 {
+    _Py_slist_item: _Py_slist_item_s,
+    key_hash: u64,
+    key: *mut (),
+    value: *mut (),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_hashtable_h_56 {
+    malloc: Option<unsafe extern "C-unwind" fn(u64) -> *mut ()>,
+    free: Option<unsafe extern "C-unwind" fn(*mut ())>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_hashtable_t {
+    nentries: u64,
+    nbuckets: u64,
+    buckets: *mut __SlateRecord_pycore_hashtable_h_19,
+    get_entry_func: Option<
+        unsafe extern "C-unwind" fn(
+            *mut _Py_hashtable_t,
+            *const (),
+        ) -> *mut __SlateRecord_pycore_hashtable_h_35,
+    >,
+    hash_func: Option<unsafe extern "C-unwind" fn(*const ()) -> u64>,
+    compare_func: Option<unsafe extern "C-unwind" fn(*const (), *const ()) -> i32>,
+    key_destroy_func: Option<unsafe extern "C-unwind" fn(*mut ())>,
+    value_destroy_func: Option<unsafe extern "C-unwind" fn(*mut ())>,
+    alloc: __SlateRecord_pycore_hashtable_h_56,
+}
+
+fn _Py_hashtable_get_entry(
+    ht: *mut _Py_hashtable_t,
+    key: *const (),
+) -> *mut __SlateRecord_pycore_hashtable_h_35 {
+    unsafe { unsafe { (*ht).get_entry_func }.unwrap()(ht, key) }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _reftracer_runtime_state {
+    tracer_func: Option<unsafe extern "C-unwind" fn(*mut _object, u32, *mut ()) -> i32>,
+    tracer_data: *mut (),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_interp_structs_h_504 {
+    types: [__SlateRecord_pycore_interp_structs_h_505; 210],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_interp_structs_h_505 {
+    r#type: *mut _typeobject,
+    interp_count: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _py_object_runtime_state {
+    _not_used: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _py_object_state {
+    freelists: _Py_freelists,
+    _not_used: i32,
+}
+
+fn _PyErr_Occurred(tstate: *mut _ts) -> *mut _object {
+    if unsafe { (*tstate).current_exception }.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    Py_TYPE!(unsafe { (*tstate).current_exception }) as *mut _object
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _xidata {
+    data: *mut (),
+    obj: *mut _object,
+    interpid: i64,
+    new_object: Option<unsafe extern "C-unwind" fn(*mut _xidata) -> *mut _object>,
+    free: Option<unsafe extern "C-unwind" fn(*mut ())>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_interp_structs_h_592 {
+    num_initialized: u64,
+    initialized: [__SlateRecord_pycore_interp_structs_h_544; 200],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_interp_structs_h_597 {
+    num_initialized: u64,
+    next_index: u64,
+    initialized: [__SlateRecord_pycore_interp_structs_h_544; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_crossinterp_h_150 {
+    basic: Option<unsafe extern "C-unwind" fn(*mut _ts, *mut _object, *mut _xidata) -> i32>,
+    fallback: Option<unsafe extern "C-unwind" fn(*mut _ts, *mut _object, i32, *mut _xidata) -> i32>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _xid_regitem {
+    prev: *mut _xid_regitem,
+    next: *mut _xid_regitem,
+    cls: *mut _typeobject,
+    weakref: *mut _object,
+    refcount: u64,
+    getdata: __SlateRecord_pycore_crossinterp_h_150,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_crossinterp_data_registry_h_28 {
+    global: i32,
+    initialized: i32,
+    mutex: PyMutex,
+    head: *mut _xid_regitem,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _xid_lookup_state {
+    registry: __SlateRecord_pycore_crossinterp_data_registry_h_28,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_crossinterp_h_255 {
+    data_lookup: _xid_lookup_state,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_crossinterp_h_268 {
+    data_lookup: _xid_lookup_state,
+    exceptions: xi_exceptions,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_long_state {
+    max_str_digits: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct codecs_state {
+    search_path: *mut _object,
+    search_cache: *mut _object,
+    error_registry: *mut _object,
+    initialized: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _stoptheworld_state {
+    mutex: PyMutex,
+    requested: bool,
+    world_stopped: bool,
+    is_global: bool,
+    stop_event: __SlateRecord_pycore_lock_h_69,
+    thread_countdown: i64,
+    requester: *mut _ts,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _rare_events {
+    set_class: u8,
+    set_bases: u8,
+    set_eval_frame_func: u8,
+    builtin_dict: u8,
+    func_modification: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Bigint {
+    next: *mut Bigint,
+    k: i32,
+    maxwds: i32,
+    sign: i32,
+    wds: i32,
+    x: [u32; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_interp_structs_h_718 {
+    _not_used: i32,
+    _hamt_empty_gc_not_used: __SlateRecord_pycore_interp_structs_h_170,
+    hamt_empty: __SlateRecord_pycore_structs_h_47,
+    last_resort_memory_error: __SlateRecord_pyerrors_h_15,
+}
+
+// The size of the Bigint freelist
+// The size of the cached powers of 5 array
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _dtoa_state {
+    p5s: [*mut Bigint; 8],
+    freelist: [*mut Bigint; 8],
+    preallocated: [f64; 288],
+    preallocated_next: *mut f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _py_code_state {
+    mutex: PyMutex,
+    constants: *mut _Py_hashtable_t,
+}
+
+// Must be a power of 2
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _func_version_cache_item {
+    func: *mut __SlateRecord_funcobject_h_62,
+    code: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct pythreads {
+    next_unique_id: u64,
+    head: *mut _ts,
+    preallocated: *mut _PyThreadStateImpl,
+    main: *mut _ts,
+    count: i64,
+    stacksize: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _py_func_state {
+    next_version: u32,
+    func_version_cache: [_func_version_cache_item; 4096],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_dict_state {
+    next_keys_version: u32,
+    watcher_mutex: PyMutex,
+    watcher_setup_once: __SlateRecord_modsupport_h_9,
+    watchers: [Option<
+        unsafe extern "C-unwind" fn(u32, *mut _object, *mut _object, *mut _object) -> i32,
+    >; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_exc_state {
+    errnomap: *mut _object,
+    memerrors_freelist: *mut __SlateRecord_pyerrors_h_15,
+    memerrors_numfree: i32,
+    PyExc_ExceptionGroup: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_pycore_obmalloc_h_255 {
+    _padding: *mut u8,
+    count: u32,
+}
+
+// For now we hard-code this to a value for which we are confident
+// all the static builtin types will fit (for all builds).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _types_runtime_state {
+    next_version_tag: u32,
+    managed_static: __SlateRecord_pycore_interp_structs_h_504,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct type_cache_entry {
+    version: u32,
+    name: *mut _object,
+    value: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct type_cache {
+    hashtable: [type_cache_entry; 4096],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_interp_structs_h_544 {
+    r#type: *mut _typeobject,
+    isbuiltin: i32,
+    readying: i32,
+    ready: i32,
+    tp_dict: *mut _object,
+    tp_subclasses: *mut _object,
+    tp_weaklist: *mut _object,
+}
+
+// Must be a power of 2
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct types_state {
+    next_version_tag: u32,
+    type_cache: type_cache,
+    builtins: __SlateRecord_pycore_interp_structs_h_592,
+    for_extensions: __SlateRecord_pycore_interp_structs_h_597,
+    mutex: PyMutex,
+    type_version_cache: [*mut _typeobject; 4096],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _warnings_runtime_state {
+    filters: *mut _object,
+    once_registry: *mut _object,
+    default_action: *mut _object,
+    lock: __SlateRecord_pycore_lock_h_153,
+    filters_version: i64,
+    context: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_mem_interp_free_queue {
+    has_work: i32,
+    mutex: PyMutex,
+    head: llist_node,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_unicode_runtime_ids {
+    mutex: PyMutex,
+    next_index: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_unicode_runtime_state {
+    ids: _Py_unicode_runtime_ids,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_unicode_fs_codec {
+    encoding: *mut i8,
+    utf8: i32,
+    errors: *mut i8,
+    error_handler: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_unicode_ids {
+    size: i64,
+    array: *mut *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_runtime_structs_h_23 {
+    raw: __SlateRecord_pymem_h_48,
+    mem: __SlateRecord_pymem_h_48,
+    obj: __SlateRecord_pymem_h_48,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_runtime_structs_h_28 {
+    raw: __SlateRecord_pycore_runtime_structs_h_19,
+    mem: __SlateRecord_pycore_runtime_structs_h_19,
+    obj: __SlateRecord_pycore_runtime_structs_h_19,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ucnhash_h_29 {
+    getname: Option<unsafe extern "C-unwind" fn(u32, *mut i8, i32, i32) -> i32>,
+    getcode: Option<unsafe extern "C-unwind" fn(*const i8, i32, *mut u32, i32) -> i32>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_unicode_state {
+    fs_codec: _Py_unicode_fs_codec,
+    ucnhash_capi: *mut __SlateRecord_pycore_ucnhash_h_29,
+    ids: _Py_unicode_ids,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_runtime_structs_h_49 {
+    fd: i32,
+    st_dev: u64,
+    st_ino: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct callable_cache {
+    isinstance: *mut _object,
+    len: *mut _object,
+    list_append: *mut _object,
+    object__getattribute__: *mut _object,
+}
+
+// Length of array of slotdef pointers used to store slots with the
+// same __name__.  There should be at most MAX_EQUIV-1 slotdef entries with
+// the same __name__, for any __name__. Since that's a static property, it is
+// appropriate to declare fixed-size arrays for this.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_interp_cached_objects {
+    interned_strings: *mut _object,
+    objreduce: *mut _object,
+    type_slots_pname: *mut _object,
+    type_slots_ptrs: [*mut wrapperbase; 10],
+    generic_type: *mut _typeobject,
+    typevar_type: *mut _typeobject,
+    typevartuple_type: *mut _typeobject,
+    paramspec_type: *mut _typeobject,
+    paramspecargs_type: *mut _typeobject,
+    paramspeckwargs_type: *mut _typeobject,
+    constevaluator_type: *mut _typeobject,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_interp_static_objects {
+    singletons: __SlateRecord_pycore_interp_structs_h_718,
+}
+
+// Count of all local monitoring events
+// Count of all "real" monitoring events (not derived from other events)
+// Count of all  monitoring events
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_LocalMonitors {
+    tools: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_tracemalloc_h_70 {
+    mem: __SlateRecord_pymem_h_48,
+    raw: __SlateRecord_pymem_h_48,
+    obj: __SlateRecord_pymem_h_48,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_GlobalMonitors {
+    tools: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_instruments_h_94 {
+    bytes_per_entry: u8,
+    data: [u8; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _runtime_state {
+    size: u64,
+    finalizing: u64,
+    interpreters_head: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _interpreter_state {
+    size: u64,
+    id: u64,
+    next: u64,
+    threads_head: u64,
+    threads_main: u64,
+    gc: u64,
+    imports_modules: u64,
+    sysdict: u64,
+    builtins: u64,
+    ceval_gil: u64,
+    gil_runtime_state: u64,
+    gil_runtime_state_enabled: u64,
+    gil_runtime_state_locked: u64,
+    gil_runtime_state_holder: u64,
+    code_object_generation: u64,
+    tlbc_generation: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _thread_state {
+    size: u64,
+    prev: u64,
+    next: u64,
+    interp: u64,
+    current_frame: u64,
+    thread_id: u64,
+    native_thread_id: u64,
+    datastack_chunk: u64,
+    status: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _interpreter_frame {
+    size: u64,
+    previous: u64,
+    executable: u64,
+    instr_ptr: u64,
+    localsplus: u64,
+    owner: u64,
+    stackpointer: u64,
+    tlbc_index: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _code_object {
+    size: u64,
+    filename: u64,
+    name: u64,
+    qualname: u64,
+    linetable: u64,
+    firstlineno: u64,
+    argcount: u64,
+    localsplusnames: u64,
+    localspluskinds: u64,
+    co_code_adaptive: u64,
+    co_tlbc: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _pyobject {
+    size: u64,
+    ob_type: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _type_object {
+    size: u64,
+    tp_name: u64,
+    tp_repr: u64,
+    tp_flags: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _tuple_object {
+    size: u64,
+    ob_item: u64,
+    ob_size: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _list_object {
+    size: u64,
+    ob_item: u64,
+    ob_size: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _set_object {
+    size: u64,
+    used: u64,
+    table: u64,
+    mask: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _dict_object {
+    size: u64,
+    ma_keys: u64,
+    ma_values: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _float_object {
+    size: u64,
+    ob_fval: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _long_object {
+    size: u64,
+    lv_tag: u64,
+    ob_digit: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _bytes_object {
+    size: u64,
+    ob_size: u64,
+    ob_sval: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _unicode_object {
+    size: u64,
+    state: u64,
+    length: u64,
+    asciiobject_size: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _gc {
+    size: u64,
+    collecting: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _gen_object {
+    size: u64,
+    gi_name: u64,
+    gi_iframe: u64,
+    gi_frame_state: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _llist_node {
+    next: u64,
+    prev: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _debugger_support {
+    eval_breaker: u64,
+    remote_debugger_support: u64,
+    remote_debugging_enabled: u64,
+    debugger_pending_call: u64,
+    debugger_script_path: u64,
+    debugger_script_path_size: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _PyCoMonitoringData {
+    local_monitors: _Py_LocalMonitors,
+    active_monitors: _Py_LocalMonitors,
+    tools: *mut u8,
+    tool_versions: [u64; 8],
+    lines: *mut __SlateRecord_pycore_instruments_h_94,
+    line_tools: *mut u8,
+    per_instruction_opcodes: *mut u8,
+    per_instruction_tools: *mut u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _is {
+    ceval: _ceval_state,
+    _malloced: *mut (),
+    next: *mut _is,
+    id: i64,
+    id_refcount: i64,
+    requires_idref: i32,
+    _whence: i64,
+    _initialized: i32,
+    _ready: i32,
+    finalizing: i32,
+    last_restart_version: u64,
+    threads: pythreads,
+    runtime: *mut pyruntimestate,
+    _finalizing: *mut _ts,
+    _finalizing_id: u64,
+    gc: _gc_runtime_state,
+    sysdict: *mut _object,
+    builtins: *mut _object,
+    imports: _import_state,
+    _gil: _gil_runtime_state,
+    _code_object_generation: u64,
+    codecs: codecs_state,
+    config: PyConfig,
+    feature_flags: u64,
+    dict: *mut _object,
+    sysdict_copy: *mut _object,
+    builtins_copy: *mut _object,
+    eval_frame: Option<
+        unsafe extern "C-unwind" fn(*mut _ts, *mut _PyInterpreterFrame, i32) -> *mut _object,
+    >,
+    func_watchers: [Option<
+        unsafe extern "C-unwind" fn(u32, *mut __SlateRecord_funcobject_h_62, *mut _object) -> i32,
+    >; 8],
+    active_func_watchers: u8,
+    co_extra_user_count: i64,
+    co_extra_freefuncs: [Option<unsafe extern "C-unwind" fn(*mut ())>; 255],
+    xi: __SlateRecord_pycore_crossinterp_h_268,
+    before_forkers: *mut _object,
+    after_forkers_parent: *mut _object,
+    after_forkers_child: *mut _object,
+    warnings: _warnings_runtime_state,
+    atexit: atexit_state,
+    stoptheworld: _stoptheworld_state,
+    qsbr: _qsbr_shared,
+    asyncio_tasks_head: llist_node,
+    asyncio_tasks_lock: PyMutex,
+    obmalloc: *mut _obmalloc_state,
+    audit_hooks: *mut _object,
+    type_watchers: [Option<unsafe extern "C-unwind" fn(*mut _typeobject) -> i32>; 8],
+    code_watchers: [Option<unsafe extern "C-unwind" fn(u32, *mut PyCodeObject) -> i32>; 8],
+    context_watchers: [Option<unsafe extern "C-unwind" fn(u32, *mut _object) -> i32>; 8],
+    active_code_watchers: u8,
+    active_context_watchers: u8,
+    object_state: _py_object_state,
+    unicode: _Py_unicode_state,
+    long_state: _Py_long_state,
+    dtoa: _dtoa_state,
+    func_state: _py_func_state,
+    code_state: _py_code_state,
+    dict_state: _Py_dict_state,
+    exc_state: _Py_exc_state,
+    mem_free_queue: _Py_mem_interp_free_queue,
+    ast: ast_state,
+    types: types_state,
+    callable_cache: callable_cache,
+    common_consts: [*mut _object; 5],
+    jit: bool,
+    executor_list_head: *mut _PyExecutorObject,
+    executor_deletion_list_head: *mut _PyExecutorObject,
+    executor_deletion_list_remaining_capacity: i32,
+    trace_run_counter: u64,
+    rare_events: _rare_events,
+    builtins_dict_watcher:
+        Option<unsafe extern "C-unwind" fn(u32, *mut _object, *mut _object, *mut _object) -> i32>,
+    monitors: _Py_GlobalMonitors,
+    sys_profile_once_flag: __SlateRecord_modsupport_h_9,
+    sys_trace_once_flag: __SlateRecord_modsupport_h_9,
+    sys_profiling_threads: i64,
+    sys_tracing_threads: i64,
+    monitoring_callables: [[*mut _object; 19]; 8],
+    monitoring_tool_names: [*mut _object; 8],
+    monitoring_tool_versions: [u64; 8],
+    cached_objects: _Py_interp_cached_objects,
+    static_objects: _Py_interp_static_objects,
+    _interactive_src_count: i64,
+    _initial_thread: _PyThreadStateImpl,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_siginfo_t_h_124_2 {
+    _pad: [i32; 28],
+    _kill: __SlateRecord_siginfo_t_h_124_3,
+    _timer: __SlateRecord_siginfo_t_h_124_4,
+    _rt: __SlateRecord_siginfo_t_h_124_5,
+    _sigchld: __SlateRecord_siginfo_t_h_124_6,
+    _sigfault: __SlateRecord_siginfo_t_h_124_7,
+    _sigpoll: __SlateRecord_siginfo_t_h_124_10,
+    _sigsys: __SlateRecord_siginfo_t_h_124_11,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_siginfo_t_h_124_3 {
+    si_pid: i32,
+    si_uid: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_siginfo_t_h_124_4 {
+    si_tid: i32,
+    si_overrun: i32,
+    si_sigval: sigval,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_siginfo_t_h_124_5 {
+    si_pid: i32,
+    si_uid: u32,
+    si_sigval: sigval,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_siginfo_t_h_124_6 {
+    si_pid: i32,
+    si_uid: u32,
+    si_status: i32,
+    si_utime: i64,
+    si_stime: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_siginfo_t_h_124_7 {
+    si_addr: *mut (),
+    si_addr_lsb: i16,
+    _bounds: __SlateRecord_siginfo_t_h_124_8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_siginfo_t_h_124_8 {
+    _addr_bnd: __SlateRecord_siginfo_t_h_124_9,
+    _pkey: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_siginfo_t_h_124_9 {
+    _lower: *mut (),
+    _upper: *mut (),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_siginfo_t_h_124_10 {
+    si_band: i64,
+    si_fd: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_siginfo_t_h_124_11 {
+    _call_addr: *mut (),
+    _syscall: i32,
+    _arch: u32,
+}
+
+fn _Py_IsMainInterpreter(interp: *mut _is) -> i32 {
+    (interp == unsafe { _PyInterpreterState_Main() }) as i32
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_sigaction_h_31 {
+    sa_handler: Option<unsafe extern "C-unwind" fn(i32)>,
+    sa_sigaction:
+        Option<unsafe extern "C-unwind" fn(i32, *mut __SlateRecord_siginfo_t_h_124, *mut ())>,
+}
+
+fn _PyThreadState_GET() -> *mut _ts {
+    unsafe { _Py_tss_tstate }
+}
+
+fn _PyInterpreterState_GET() -> *mut _is {
+    let tstate: *mut _ts = _PyThreadState_GET();
+    unsafe { (*tstate).interp }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_signal_h_40 {
+    tripped: i32,
+    func: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_signal_h_46 {
+    fd: i32,
+    warn_on_full_buffer: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _module_alias {
+    name: *const i8,
+    orig: *const i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct pool_header {
+    r#ref: __SlateRecord_pycore_obmalloc_h_255,
+    freeblock: *mut u8,
+    nextpool: *mut pool_header,
+    prevpool: *mut pool_header,
+    arenaindex: u32,
+    szidx: u32,
+    nextoffset: u32,
+    maxnextoffset: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_faulthandler_h_50 {
+    enabled: i32,
+    file: *mut _object,
+    fd: i32,
+    all_threads: i32,
+    interp: *mut _is,
+    c_stack: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_faulthandler_h_62 {
+    file: *mut _object,
+    fd: i32,
+    timeout_us: i64,
+    repeat: i32,
+    interp: *mut _is,
+    exit: i32,
+    header: *mut i8,
+    header_len: u64,
+    cancel_event: *mut (),
+    running: *mut (),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct arena_object {
+    address: u64,
+    pool_address: *mut u8,
+    nfreepools: u32,
+    ntotalpools: u32,
+    freepools: *mut pool_header,
+    nextarena: *mut arena_object,
+    prevarena: *mut arena_object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _obmalloc_pools {
+    used: [*mut pool_header; 64],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _obmalloc_mgmt {
+    arenas: *mut arena_object,
+    maxarenas: u32,
+    unused_arena_objects: *mut arena_object,
+    usable_arenas: *mut arena_object,
+    nfp2lasta: [*mut arena_object; 65],
+    narenas_currently_allocated: u64,
+    ntimes_arena_allocated: u64,
+    narenas_highwater: u64,
+    raw_allocated_blocks: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_obmalloc_h_622 {
+    tail_hi: i32,
+    tail_lo: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct arena_map_bot {
+    arenas: [__SlateRecord_pycore_obmalloc_h_622; 16384],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct arena_map_mid {
+    ptrs: [*mut arena_map_bot; 32768],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct arena_map_top {
+    ptrs: [*mut arena_map_mid; 32768],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _obmalloc_usage {
+    arena_map_root: arena_map_top,
+    arena_map_mid_count: i32,
+    arena_map_bot_count: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _obmalloc_global_state {
+    dump_debug_stats: i32,
+    interpreter_leaks: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _obmalloc_state {
+    pools: _obmalloc_pools,
+    mgmt: _obmalloc_mgmt,
+    usage: _obmalloc_usage,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_pycore_ast_h_370 {
+    BoolOp: __SlateRecord_pycore_ast_h_371,
+    NamedExpr: __SlateRecord_pycore_ast_h_376,
+    BinOp: __SlateRecord_pycore_ast_h_381,
+    UnaryOp: __SlateRecord_pycore_ast_h_387,
+    Lambda: __SlateRecord_pycore_ast_h_392,
+    IfExp: __SlateRecord_pycore_ast_h_397,
+    Dict: __SlateRecord_pycore_ast_h_403,
+    Set: __SlateRecord_pycore_ast_h_408,
+    ListComp: __SlateRecord_pycore_ast_h_412,
+    SetComp: __SlateRecord_pycore_ast_h_417,
+    DictComp: __SlateRecord_pycore_ast_h_422,
+    GeneratorExp: __SlateRecord_pycore_ast_h_428,
+    Await: __SlateRecord_pycore_ast_h_433,
+    Yield: __SlateRecord_pycore_ast_h_437,
+    YieldFrom: __SlateRecord_pycore_ast_h_441,
+    Compare: __SlateRecord_pycore_ast_h_445,
+    Call: __SlateRecord_pycore_ast_h_451,
+    FormattedValue: __SlateRecord_pycore_ast_h_457,
+    Interpolation: __SlateRecord_pycore_ast_h_463,
+    JoinedStr: __SlateRecord_pycore_ast_h_470,
+    TemplateStr: __SlateRecord_pycore_ast_h_474,
+    Constant: __SlateRecord_pycore_ast_h_478,
+    Attribute: __SlateRecord_pycore_ast_h_483,
+    Subscript: __SlateRecord_pycore_ast_h_489,
+    Starred: __SlateRecord_pycore_ast_h_495,
+    Name: __SlateRecord_pycore_ast_h_500,
+    List: __SlateRecord_pycore_ast_h_505,
+    Tuple: __SlateRecord_pycore_ast_h_510,
+    Slice: __SlateRecord_pycore_ast_h_515,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_371 {
+    op: u32,
+    values: *mut __SlateRecord_pycore_ast_h_74,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_376 {
+    target: *mut _expr,
+    value: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_381 {
+    left: *mut _expr,
+    op: u32,
+    right: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_387 {
+    op: u32,
+    operand: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_392 {
+    args: *mut _arguments,
+    body: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_397 {
+    test: *mut _expr,
+    body: *mut _expr,
+    orelse: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_403 {
+    keys: *mut __SlateRecord_pycore_ast_h_74,
+    values: *mut __SlateRecord_pycore_ast_h_74,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_408 {
+    elts: *mut __SlateRecord_pycore_ast_h_74,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_412 {
+    elt: *mut _expr,
+    generators: *mut __SlateRecord_pycore_ast_h_81,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_417 {
+    elt: *mut _expr,
+    generators: *mut __SlateRecord_pycore_ast_h_81,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_422 {
+    key: *mut _expr,
+    value: *mut _expr,
+    generators: *mut __SlateRecord_pycore_ast_h_81,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_428 {
+    elt: *mut _expr,
+    generators: *mut __SlateRecord_pycore_ast_h_81,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_433 {
+    value: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_437 {
+    value: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_441 {
+    value: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_445 {
+    left: *mut _expr,
+    ops: *mut __SlateRecord_pycore_asdl_h_45,
+    comparators: *mut __SlateRecord_pycore_ast_h_74,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_451 {
+    func: *mut _expr,
+    args: *mut __SlateRecord_pycore_ast_h_74,
+    keywords: *mut __SlateRecord_pycore_ast_h_111,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_457 {
+    value: *mut _expr,
+    conversion: i32,
+    format_spec: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_463 {
+    value: *mut _expr,
+    str: *mut _object,
+    conversion: i32,
+    format_spec: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_470 {
+    values: *mut __SlateRecord_pycore_ast_h_74,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_474 {
+    values: *mut __SlateRecord_pycore_ast_h_74,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_478 {
+    value: *mut _object,
+    kind: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_483 {
+    value: *mut _expr,
+    attr: *mut _object,
+    ctx: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_489 {
+    value: *mut _expr,
+    slice: *mut _expr,
+    ctx: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_495 {
+    value: *mut _expr,
+    ctx: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_500 {
+    id: *mut _object,
+    ctx: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_505 {
+    elts: *mut __SlateRecord_pycore_ast_h_74,
+    ctx: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_510 {
+    elts: *mut __SlateRecord_pycore_ast_h_74,
+    ctx: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_515 {
+    lower: *mut _expr,
+    upper: *mut _expr,
+    step: *mut _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_runtime_structs_h_19 {
+    api_id: i8,
+    alloc: __SlateRecord_pymem_h_48,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _pymem_allocators {
+    mutex: PyMutex,
+    standard: __SlateRecord_pycore_runtime_structs_h_23,
+    debug: __SlateRecord_pycore_runtime_structs_h_28,
+    is_debug_enabled: i32,
+    obj_arena: __SlateRecord_objimpl_h_68,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_float_runtime_state {
+    float_format: u32,
+    double_format: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct pyhash_runtime_state {
+    urandom_cache: __SlateRecord_pycore_runtime_structs_h_49,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_32 {
+    _py_anon_dictcomp: __SlateRecord_pycore_global_strings_h_33,
+    _py_anon_genexpr: __SlateRecord_pycore_global_strings_h_34,
+    _py_anon_lambda: __SlateRecord_pycore_global_strings_h_35,
+    _py_anon_listcomp: __SlateRecord_pycore_global_strings_h_36,
+    _py_anon_module: __SlateRecord_pycore_global_strings_h_37,
+    _py_anon_null: __SlateRecord_pycore_global_strings_h_38,
+    _py_anon_setcomp: __SlateRecord_pycore_global_strings_h_39,
+    _py_anon_string: __SlateRecord_pycore_global_strings_h_40,
+    _py_anon_unknown: __SlateRecord_pycore_global_strings_h_41,
+    _py_dbl_close_br: __SlateRecord_pycore_global_strings_h_42,
+    _py_dbl_open_br: __SlateRecord_pycore_global_strings_h_43,
+    _py_dbl_percent: __SlateRecord_pycore_global_strings_h_44,
+    _py_defaults: __SlateRecord_pycore_global_strings_h_45,
+    _py_dot_locals: __SlateRecord_pycore_global_strings_h_46,
+    _py_empty: __SlateRecord_pycore_global_strings_h_47,
+    _py_format: __SlateRecord_pycore_global_strings_h_48,
+    _py_generic_base: __SlateRecord_pycore_global_strings_h_49,
+    _py_json_decoder: __SlateRecord_pycore_global_strings_h_50,
+    _py_kwdefaults: __SlateRecord_pycore_global_strings_h_51,
+    _py_list_err: __SlateRecord_pycore_global_strings_h_52,
+    _py_str_replace_inf: __SlateRecord_pycore_global_strings_h_53,
+    _py_type_params: __SlateRecord_pycore_global_strings_h_54,
+    _py_utf_8: __SlateRecord_pycore_global_strings_h_55,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_33 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_34 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_35 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_36 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_37 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_38 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_39 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_40 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_41 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_42 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_43 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_44 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_45 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_46 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_47 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_48 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_49 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_50 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_51 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_52 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 24],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_53 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_54 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_55 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_58 {
+    _py_CANCELLED: __SlateRecord_pycore_global_strings_h_59,
+    _py_FINISHED: __SlateRecord_pycore_global_strings_h_60,
+    _py_False: __SlateRecord_pycore_global_strings_h_61,
+    _py_JSONDecodeError: __SlateRecord_pycore_global_strings_h_62,
+    _py_PENDING: __SlateRecord_pycore_global_strings_h_63,
+    _py_Py_Repr: __SlateRecord_pycore_global_strings_h_64,
+    _py_TextIOWrapper: __SlateRecord_pycore_global_strings_h_65,
+    _py_True: __SlateRecord_pycore_global_strings_h_66,
+    _py_WarningMessage: __SlateRecord_pycore_global_strings_h_67,
+    _py__WindowsConsoleIO: __SlateRecord_pycore_global_strings_h_68,
+    _py___IOBase_closed: __SlateRecord_pycore_global_strings_h_69,
+    _py___abc_tpflags__: __SlateRecord_pycore_global_strings_h_70,
+    _py___abs__: __SlateRecord_pycore_global_strings_h_71,
+    _py___abstractmethods__: __SlateRecord_pycore_global_strings_h_72,
+    _py___add__: __SlateRecord_pycore_global_strings_h_73,
+    _py___aenter__: __SlateRecord_pycore_global_strings_h_74,
+    _py___aexit__: __SlateRecord_pycore_global_strings_h_75,
+    _py___aiter__: __SlateRecord_pycore_global_strings_h_76,
+    _py___all__: __SlateRecord_pycore_global_strings_h_77,
+    _py___and__: __SlateRecord_pycore_global_strings_h_78,
+    _py___anext__: __SlateRecord_pycore_global_strings_h_79,
+    _py___annotate__: __SlateRecord_pycore_global_strings_h_80,
+    _py___annotate_func__: __SlateRecord_pycore_global_strings_h_81,
+    _py___annotations__: __SlateRecord_pycore_global_strings_h_82,
+    _py___annotations_cache__: __SlateRecord_pycore_global_strings_h_83,
+    _py___args__: __SlateRecord_pycore_global_strings_h_84,
+    _py___await__: __SlateRecord_pycore_global_strings_h_85,
+    _py___bases__: __SlateRecord_pycore_global_strings_h_86,
+    _py___bool__: __SlateRecord_pycore_global_strings_h_87,
+    _py___buffer__: __SlateRecord_pycore_global_strings_h_88,
+    _py___build_class__: __SlateRecord_pycore_global_strings_h_89,
+    _py___builtins__: __SlateRecord_pycore_global_strings_h_90,
+    _py___bytes__: __SlateRecord_pycore_global_strings_h_91,
+    _py___call__: __SlateRecord_pycore_global_strings_h_92,
+    _py___cantrace__: __SlateRecord_pycore_global_strings_h_93,
+    _py___ceil__: __SlateRecord_pycore_global_strings_h_94,
+    _py___class__: __SlateRecord_pycore_global_strings_h_95,
+    _py___class_getitem__: __SlateRecord_pycore_global_strings_h_96,
+    _py___classcell__: __SlateRecord_pycore_global_strings_h_97,
+    _py___classdict__: __SlateRecord_pycore_global_strings_h_98,
+    _py___classdictcell__: __SlateRecord_pycore_global_strings_h_99,
+    _py___complex__: __SlateRecord_pycore_global_strings_h_100,
+    _py___conditional_annotations__: __SlateRecord_pycore_global_strings_h_101,
+    _py___contains__: __SlateRecord_pycore_global_strings_h_102,
+    _py___ctypes_from_outparam__: __SlateRecord_pycore_global_strings_h_103,
+    _py___del__: __SlateRecord_pycore_global_strings_h_104,
+    _py___delattr__: __SlateRecord_pycore_global_strings_h_105,
+    _py___delete__: __SlateRecord_pycore_global_strings_h_106,
+    _py___delitem__: __SlateRecord_pycore_global_strings_h_107,
+    _py___dict__: __SlateRecord_pycore_global_strings_h_108,
+    _py___dictoffset__: __SlateRecord_pycore_global_strings_h_109,
+    _py___dir__: __SlateRecord_pycore_global_strings_h_110,
+    _py___divmod__: __SlateRecord_pycore_global_strings_h_111,
+    _py___doc__: __SlateRecord_pycore_global_strings_h_112,
+    _py___enter__: __SlateRecord_pycore_global_strings_h_113,
+    _py___eq__: __SlateRecord_pycore_global_strings_h_114,
+    _py___exit__: __SlateRecord_pycore_global_strings_h_115,
+    _py___file__: __SlateRecord_pycore_global_strings_h_116,
+    _py___firstlineno__: __SlateRecord_pycore_global_strings_h_117,
+    _py___float__: __SlateRecord_pycore_global_strings_h_118,
+    _py___floor__: __SlateRecord_pycore_global_strings_h_119,
+    _py___floordiv__: __SlateRecord_pycore_global_strings_h_120,
+    _py___format__: __SlateRecord_pycore_global_strings_h_121,
+    _py___fspath__: __SlateRecord_pycore_global_strings_h_122,
+    _py___ge__: __SlateRecord_pycore_global_strings_h_123,
+    _py___get__: __SlateRecord_pycore_global_strings_h_124,
+    _py___getattr__: __SlateRecord_pycore_global_strings_h_125,
+    _py___getattribute__: __SlateRecord_pycore_global_strings_h_126,
+    _py___getinitargs__: __SlateRecord_pycore_global_strings_h_127,
+    _py___getitem__: __SlateRecord_pycore_global_strings_h_128,
+    _py___getnewargs__: __SlateRecord_pycore_global_strings_h_129,
+    _py___getnewargs_ex__: __SlateRecord_pycore_global_strings_h_130,
+    _py___getstate__: __SlateRecord_pycore_global_strings_h_131,
+    _py___gt__: __SlateRecord_pycore_global_strings_h_132,
+    _py___hash__: __SlateRecord_pycore_global_strings_h_133,
+    _py___iadd__: __SlateRecord_pycore_global_strings_h_134,
+    _py___iand__: __SlateRecord_pycore_global_strings_h_135,
+    _py___ifloordiv__: __SlateRecord_pycore_global_strings_h_136,
+    _py___ilshift__: __SlateRecord_pycore_global_strings_h_137,
+    _py___imatmul__: __SlateRecord_pycore_global_strings_h_138,
+    _py___imod__: __SlateRecord_pycore_global_strings_h_139,
+    _py___import__: __SlateRecord_pycore_global_strings_h_140,
+    _py___imul__: __SlateRecord_pycore_global_strings_h_141,
+    _py___index__: __SlateRecord_pycore_global_strings_h_142,
+    _py___init__: __SlateRecord_pycore_global_strings_h_143,
+    _py___init_subclass__: __SlateRecord_pycore_global_strings_h_144,
+    _py___instancecheck__: __SlateRecord_pycore_global_strings_h_145,
+    _py___int__: __SlateRecord_pycore_global_strings_h_146,
+    _py___invert__: __SlateRecord_pycore_global_strings_h_147,
+    _py___ior__: __SlateRecord_pycore_global_strings_h_148,
+    _py___ipow__: __SlateRecord_pycore_global_strings_h_149,
+    _py___irshift__: __SlateRecord_pycore_global_strings_h_150,
+    _py___isabstractmethod__: __SlateRecord_pycore_global_strings_h_151,
+    _py___isub__: __SlateRecord_pycore_global_strings_h_152,
+    _py___iter__: __SlateRecord_pycore_global_strings_h_153,
+    _py___itruediv__: __SlateRecord_pycore_global_strings_h_154,
+    _py___ixor__: __SlateRecord_pycore_global_strings_h_155,
+    _py___le__: __SlateRecord_pycore_global_strings_h_156,
+    _py___len__: __SlateRecord_pycore_global_strings_h_157,
+    _py___length_hint__: __SlateRecord_pycore_global_strings_h_158,
+    _py___lltrace__: __SlateRecord_pycore_global_strings_h_159,
+    _py___loader__: __SlateRecord_pycore_global_strings_h_160,
+    _py___lshift__: __SlateRecord_pycore_global_strings_h_161,
+    _py___lt__: __SlateRecord_pycore_global_strings_h_162,
+    _py___main__: __SlateRecord_pycore_global_strings_h_163,
+    _py___match_args__: __SlateRecord_pycore_global_strings_h_164,
+    _py___matmul__: __SlateRecord_pycore_global_strings_h_165,
+    _py___missing__: __SlateRecord_pycore_global_strings_h_166,
+    _py___mod__: __SlateRecord_pycore_global_strings_h_167,
+    _py___module__: __SlateRecord_pycore_global_strings_h_168,
+    _py___mro_entries__: __SlateRecord_pycore_global_strings_h_169,
+    _py___mul__: __SlateRecord_pycore_global_strings_h_170,
+    _py___name__: __SlateRecord_pycore_global_strings_h_171,
+    _py___ne__: __SlateRecord_pycore_global_strings_h_172,
+    _py___neg__: __SlateRecord_pycore_global_strings_h_173,
+    _py___new__: __SlateRecord_pycore_global_strings_h_174,
+    _py___newobj__: __SlateRecord_pycore_global_strings_h_175,
+    _py___newobj_ex__: __SlateRecord_pycore_global_strings_h_176,
+    _py___next__: __SlateRecord_pycore_global_strings_h_177,
+    _py___notes__: __SlateRecord_pycore_global_strings_h_178,
+    _py___or__: __SlateRecord_pycore_global_strings_h_179,
+    _py___orig_class__: __SlateRecord_pycore_global_strings_h_180,
+    _py___origin__: __SlateRecord_pycore_global_strings_h_181,
+    _py___package__: __SlateRecord_pycore_global_strings_h_182,
+    _py___parameters__: __SlateRecord_pycore_global_strings_h_183,
+    _py___path__: __SlateRecord_pycore_global_strings_h_184,
+    _py___pos__: __SlateRecord_pycore_global_strings_h_185,
+    _py___pow__: __SlateRecord_pycore_global_strings_h_186,
+    _py___prepare__: __SlateRecord_pycore_global_strings_h_187,
+    _py___qualname__: __SlateRecord_pycore_global_strings_h_188,
+    _py___radd__: __SlateRecord_pycore_global_strings_h_189,
+    _py___rand__: __SlateRecord_pycore_global_strings_h_190,
+    _py___rdivmod__: __SlateRecord_pycore_global_strings_h_191,
+    _py___reduce__: __SlateRecord_pycore_global_strings_h_192,
+    _py___reduce_ex__: __SlateRecord_pycore_global_strings_h_193,
+    _py___release_buffer__: __SlateRecord_pycore_global_strings_h_194,
+    _py___repr__: __SlateRecord_pycore_global_strings_h_195,
+    _py___reversed__: __SlateRecord_pycore_global_strings_h_196,
+    _py___rfloordiv__: __SlateRecord_pycore_global_strings_h_197,
+    _py___rlshift__: __SlateRecord_pycore_global_strings_h_198,
+    _py___rmatmul__: __SlateRecord_pycore_global_strings_h_199,
+    _py___rmod__: __SlateRecord_pycore_global_strings_h_200,
+    _py___rmul__: __SlateRecord_pycore_global_strings_h_201,
+    _py___ror__: __SlateRecord_pycore_global_strings_h_202,
+    _py___round__: __SlateRecord_pycore_global_strings_h_203,
+    _py___rpow__: __SlateRecord_pycore_global_strings_h_204,
+    _py___rrshift__: __SlateRecord_pycore_global_strings_h_205,
+    _py___rshift__: __SlateRecord_pycore_global_strings_h_206,
+    _py___rsub__: __SlateRecord_pycore_global_strings_h_207,
+    _py___rtruediv__: __SlateRecord_pycore_global_strings_h_208,
+    _py___rxor__: __SlateRecord_pycore_global_strings_h_209,
+    _py___set__: __SlateRecord_pycore_global_strings_h_210,
+    _py___set_name__: __SlateRecord_pycore_global_strings_h_211,
+    _py___setattr__: __SlateRecord_pycore_global_strings_h_212,
+    _py___setitem__: __SlateRecord_pycore_global_strings_h_213,
+    _py___setstate__: __SlateRecord_pycore_global_strings_h_214,
+    _py___sizeof__: __SlateRecord_pycore_global_strings_h_215,
+    _py___slotnames__: __SlateRecord_pycore_global_strings_h_216,
+    _py___slots__: __SlateRecord_pycore_global_strings_h_217,
+    _py___spec__: __SlateRecord_pycore_global_strings_h_218,
+    _py___static_attributes__: __SlateRecord_pycore_global_strings_h_219,
+    _py___str__: __SlateRecord_pycore_global_strings_h_220,
+    _py___sub__: __SlateRecord_pycore_global_strings_h_221,
+    _py___subclasscheck__: __SlateRecord_pycore_global_strings_h_222,
+    _py___subclasshook__: __SlateRecord_pycore_global_strings_h_223,
+    _py___truediv__: __SlateRecord_pycore_global_strings_h_224,
+    _py___trunc__: __SlateRecord_pycore_global_strings_h_225,
+    _py___type_params__: __SlateRecord_pycore_global_strings_h_226,
+    _py___typing_is_unpacked_typevartuple__: __SlateRecord_pycore_global_strings_h_227,
+    _py___typing_prepare_subst__: __SlateRecord_pycore_global_strings_h_228,
+    _py___typing_subst__: __SlateRecord_pycore_global_strings_h_229,
+    _py___typing_unpacked_tuple_args__: __SlateRecord_pycore_global_strings_h_230,
+    _py___warningregistry__: __SlateRecord_pycore_global_strings_h_231,
+    _py___weaklistoffset__: __SlateRecord_pycore_global_strings_h_232,
+    _py___weakref__: __SlateRecord_pycore_global_strings_h_233,
+    _py___xor__: __SlateRecord_pycore_global_strings_h_234,
+    _py__abc_impl: __SlateRecord_pycore_global_strings_h_235,
+    _py__abstract_: __SlateRecord_pycore_global_strings_h_236,
+    _py__active: __SlateRecord_pycore_global_strings_h_237,
+    _py__anonymous_: __SlateRecord_pycore_global_strings_h_238,
+    _py__argtypes_: __SlateRecord_pycore_global_strings_h_239,
+    _py__as_parameter_: __SlateRecord_pycore_global_strings_h_240,
+    _py__asyncio_future_blocking: __SlateRecord_pycore_global_strings_h_241,
+    _py__blksize: __SlateRecord_pycore_global_strings_h_242,
+    _py__bootstrap: __SlateRecord_pycore_global_strings_h_243,
+    _py__check_retval_: __SlateRecord_pycore_global_strings_h_244,
+    _py__dealloc_warn: __SlateRecord_pycore_global_strings_h_245,
+    _py__feature_version: __SlateRecord_pycore_global_strings_h_246,
+    _py__field_types: __SlateRecord_pycore_global_strings_h_247,
+    _py__fields_: __SlateRecord_pycore_global_strings_h_248,
+    _py__filters: __SlateRecord_pycore_global_strings_h_249,
+    _py__finalizing: __SlateRecord_pycore_global_strings_h_250,
+    _py__find_and_load: __SlateRecord_pycore_global_strings_h_251,
+    _py__fix_up_module: __SlateRecord_pycore_global_strings_h_252,
+    _py__flags_: __SlateRecord_pycore_global_strings_h_253,
+    _py__get_sourcefile: __SlateRecord_pycore_global_strings_h_254,
+    _py__handle_fromlist: __SlateRecord_pycore_global_strings_h_255,
+    _py__initializing: __SlateRecord_pycore_global_strings_h_256,
+    _py__internal_use: __SlateRecord_pycore_global_strings_h_257,
+    _py__io: __SlateRecord_pycore_global_strings_h_258,
+    _py__is_text_encoding: __SlateRecord_pycore_global_strings_h_259,
+    _py__isatty_open_only: __SlateRecord_pycore_global_strings_h_260,
+    _py__length_: __SlateRecord_pycore_global_strings_h_261,
+    _py__limbo: __SlateRecord_pycore_global_strings_h_262,
+    _py__lock_unlock_module: __SlateRecord_pycore_global_strings_h_263,
+    _py__loop: __SlateRecord_pycore_global_strings_h_264,
+    _py__needs_com_addref_: __SlateRecord_pycore_global_strings_h_265,
+    _py__only_immortal: __SlateRecord_pycore_global_strings_h_266,
+    _py__restype_: __SlateRecord_pycore_global_strings_h_267,
+    _py__showwarnmsg: __SlateRecord_pycore_global_strings_h_268,
+    _py__shutdown: __SlateRecord_pycore_global_strings_h_269,
+    _py__slotnames: __SlateRecord_pycore_global_strings_h_270,
+    _py__strptime: __SlateRecord_pycore_global_strings_h_271,
+    _py__strptime_datetime_date: __SlateRecord_pycore_global_strings_h_272,
+    _py__strptime_datetime_datetime: __SlateRecord_pycore_global_strings_h_273,
+    _py__strptime_datetime_time: __SlateRecord_pycore_global_strings_h_274,
+    _py__type_: __SlateRecord_pycore_global_strings_h_275,
+    _py__uninitialized_submodules: __SlateRecord_pycore_global_strings_h_276,
+    _py__warn_unawaited_coroutine: __SlateRecord_pycore_global_strings_h_277,
+    _py__xoptions: __SlateRecord_pycore_global_strings_h_278,
+    _py_abs_tol: __SlateRecord_pycore_global_strings_h_279,
+    _py_access: __SlateRecord_pycore_global_strings_h_280,
+    _py_aclose: __SlateRecord_pycore_global_strings_h_281,
+    _py_add: __SlateRecord_pycore_global_strings_h_282,
+    _py_add_done_callback: __SlateRecord_pycore_global_strings_h_283,
+    _py_after_in_child: __SlateRecord_pycore_global_strings_h_284,
+    _py_after_in_parent: __SlateRecord_pycore_global_strings_h_285,
+    _py_aggregate_class: __SlateRecord_pycore_global_strings_h_286,
+    _py_alias: __SlateRecord_pycore_global_strings_h_287,
+    _py_align: __SlateRecord_pycore_global_strings_h_288,
+    _py_all: __SlateRecord_pycore_global_strings_h_289,
+    _py_all_threads: __SlateRecord_pycore_global_strings_h_290,
+    _py_allow_code: __SlateRecord_pycore_global_strings_h_291,
+    _py_any: __SlateRecord_pycore_global_strings_h_292,
+    _py_append: __SlateRecord_pycore_global_strings_h_293,
+    _py_arg: __SlateRecord_pycore_global_strings_h_294,
+    _py_argdefs: __SlateRecord_pycore_global_strings_h_295,
+    _py_args: __SlateRecord_pycore_global_strings_h_296,
+    _py_arguments: __SlateRecord_pycore_global_strings_h_297,
+    _py_argv: __SlateRecord_pycore_global_strings_h_298,
+    _py_as_integer_ratio: __SlateRecord_pycore_global_strings_h_299,
+    _py_asend: __SlateRecord_pycore_global_strings_h_300,
+    _py_ast: __SlateRecord_pycore_global_strings_h_301,
+    _py_athrow: __SlateRecord_pycore_global_strings_h_302,
+    _py_attribute: __SlateRecord_pycore_global_strings_h_303,
+    _py_authorizer_callback: __SlateRecord_pycore_global_strings_h_304,
+    _py_autocommit: __SlateRecord_pycore_global_strings_h_305,
+    _py_backtick: __SlateRecord_pycore_global_strings_h_306,
+    _py_base: __SlateRecord_pycore_global_strings_h_307,
+    _py_before: __SlateRecord_pycore_global_strings_h_308,
+    _py_big: __SlateRecord_pycore_global_strings_h_309,
+    _py_binary_form: __SlateRecord_pycore_global_strings_h_310,
+    _py_bit_offset: __SlateRecord_pycore_global_strings_h_311,
+    _py_bit_size: __SlateRecord_pycore_global_strings_h_312,
+    _py_block: __SlateRecord_pycore_global_strings_h_313,
+    _py_bound: __SlateRecord_pycore_global_strings_h_314,
+    _py_buffer: __SlateRecord_pycore_global_strings_h_315,
+    _py_buffer_callback: __SlateRecord_pycore_global_strings_h_316,
+    _py_buffer_size: __SlateRecord_pycore_global_strings_h_317,
+    _py_buffering: __SlateRecord_pycore_global_strings_h_318,
+    _py_buffers: __SlateRecord_pycore_global_strings_h_319,
+    _py_bufsize: __SlateRecord_pycore_global_strings_h_320,
+    _py_builtins: __SlateRecord_pycore_global_strings_h_321,
+    _py_byte_offset: __SlateRecord_pycore_global_strings_h_322,
+    _py_byte_size: __SlateRecord_pycore_global_strings_h_323,
+    _py_byteorder: __SlateRecord_pycore_global_strings_h_324,
+    _py_bytes: __SlateRecord_pycore_global_strings_h_325,
+    _py_bytes_per_sep: __SlateRecord_pycore_global_strings_h_326,
+    _py_c_call: __SlateRecord_pycore_global_strings_h_327,
+    _py_c_exception: __SlateRecord_pycore_global_strings_h_328,
+    _py_c_parameter_type: __SlateRecord_pycore_global_strings_h_329,
+    _py_c_return: __SlateRecord_pycore_global_strings_h_330,
+    _py_cached_datetime_module: __SlateRecord_pycore_global_strings_h_331,
+    _py_cached_statements: __SlateRecord_pycore_global_strings_h_332,
+    _py_cadata: __SlateRecord_pycore_global_strings_h_333,
+    _py_cafile: __SlateRecord_pycore_global_strings_h_334,
+    _py_call: __SlateRecord_pycore_global_strings_h_335,
+    _py_call_exception_handler: __SlateRecord_pycore_global_strings_h_336,
+    _py_call_soon: __SlateRecord_pycore_global_strings_h_337,
+    _py_callback: __SlateRecord_pycore_global_strings_h_338,
+    _py_cancel: __SlateRecord_pycore_global_strings_h_339,
+    _py_capath: __SlateRecord_pycore_global_strings_h_340,
+    _py_category: __SlateRecord_pycore_global_strings_h_341,
+    _py_cb_type: __SlateRecord_pycore_global_strings_h_342,
+    _py_certfile: __SlateRecord_pycore_global_strings_h_343,
+    _py_check_same_thread: __SlateRecord_pycore_global_strings_h_344,
+    _py_clear: __SlateRecord_pycore_global_strings_h_345,
+    _py_close: __SlateRecord_pycore_global_strings_h_346,
+    _py_closed: __SlateRecord_pycore_global_strings_h_347,
+    _py_closefd: __SlateRecord_pycore_global_strings_h_348,
+    _py_closure: __SlateRecord_pycore_global_strings_h_349,
+    _py_co_argcount: __SlateRecord_pycore_global_strings_h_350,
+    _py_co_cellvars: __SlateRecord_pycore_global_strings_h_351,
+    _py_co_code: __SlateRecord_pycore_global_strings_h_352,
+    _py_co_consts: __SlateRecord_pycore_global_strings_h_353,
+    _py_co_exceptiontable: __SlateRecord_pycore_global_strings_h_354,
+    _py_co_filename: __SlateRecord_pycore_global_strings_h_355,
+    _py_co_firstlineno: __SlateRecord_pycore_global_strings_h_356,
+    _py_co_flags: __SlateRecord_pycore_global_strings_h_357,
+    _py_co_freevars: __SlateRecord_pycore_global_strings_h_358,
+    _py_co_kwonlyargcount: __SlateRecord_pycore_global_strings_h_359,
+    _py_co_linetable: __SlateRecord_pycore_global_strings_h_360,
+    _py_co_name: __SlateRecord_pycore_global_strings_h_361,
+    _py_co_names: __SlateRecord_pycore_global_strings_h_362,
+    _py_co_nlocals: __SlateRecord_pycore_global_strings_h_363,
+    _py_co_posonlyargcount: __SlateRecord_pycore_global_strings_h_364,
+    _py_co_qualname: __SlateRecord_pycore_global_strings_h_365,
+    _py_co_stacksize: __SlateRecord_pycore_global_strings_h_366,
+    _py_co_varnames: __SlateRecord_pycore_global_strings_h_367,
+    _py_code: __SlateRecord_pycore_global_strings_h_368,
+    _py_col_offset: __SlateRecord_pycore_global_strings_h_369,
+    _py_command: __SlateRecord_pycore_global_strings_h_370,
+    _py_comment_factory: __SlateRecord_pycore_global_strings_h_371,
+    _py_compile_mode: __SlateRecord_pycore_global_strings_h_372,
+    _py_consts: __SlateRecord_pycore_global_strings_h_373,
+    _py_context: __SlateRecord_pycore_global_strings_h_374,
+    _py_contravariant: __SlateRecord_pycore_global_strings_h_375,
+    _py_conversion: __SlateRecord_pycore_global_strings_h_376,
+    _py_cookie: __SlateRecord_pycore_global_strings_h_377,
+    _py_copy: __SlateRecord_pycore_global_strings_h_378,
+    _py_copyreg: __SlateRecord_pycore_global_strings_h_379,
+    _py_coro: __SlateRecord_pycore_global_strings_h_380,
+    _py_count: __SlateRecord_pycore_global_strings_h_381,
+    _py_covariant: __SlateRecord_pycore_global_strings_h_382,
+    _py_cwd: __SlateRecord_pycore_global_strings_h_383,
+    _py_d_parameter_type: __SlateRecord_pycore_global_strings_h_384,
+    _py_data: __SlateRecord_pycore_global_strings_h_385,
+    _py_database: __SlateRecord_pycore_global_strings_h_386,
+    _py_day: __SlateRecord_pycore_global_strings_h_387,
+    _py_debug: __SlateRecord_pycore_global_strings_h_388,
+    _py_decode: __SlateRecord_pycore_global_strings_h_389,
+    _py_decoder: __SlateRecord_pycore_global_strings_h_390,
+    _py_default: __SlateRecord_pycore_global_strings_h_391,
+    _py_defaultaction: __SlateRecord_pycore_global_strings_h_392,
+    _py_delete: __SlateRecord_pycore_global_strings_h_393,
+    _py_depth: __SlateRecord_pycore_global_strings_h_394,
+    _py_desired_access: __SlateRecord_pycore_global_strings_h_395,
+    _py_detect_types: __SlateRecord_pycore_global_strings_h_396,
+    _py_deterministic: __SlateRecord_pycore_global_strings_h_397,
+    _py_device: __SlateRecord_pycore_global_strings_h_398,
+    _py_dict: __SlateRecord_pycore_global_strings_h_399,
+    _py_dictcomp: __SlateRecord_pycore_global_strings_h_400,
+    _py_difference_update: __SlateRecord_pycore_global_strings_h_401,
+    _py_digest: __SlateRecord_pycore_global_strings_h_402,
+    _py_digest_size: __SlateRecord_pycore_global_strings_h_403,
+    _py_digestmod: __SlateRecord_pycore_global_strings_h_404,
+    _py_dir_fd: __SlateRecord_pycore_global_strings_h_405,
+    _py_discard: __SlateRecord_pycore_global_strings_h_406,
+    _py_dispatch_table: __SlateRecord_pycore_global_strings_h_407,
+    _py_displayhook: __SlateRecord_pycore_global_strings_h_408,
+    _py_dklen: __SlateRecord_pycore_global_strings_h_409,
+    _py_doc: __SlateRecord_pycore_global_strings_h_410,
+    _py_done: __SlateRecord_pycore_global_strings_h_411,
+    _py_dont_inherit: __SlateRecord_pycore_global_strings_h_412,
+    _py_dst: __SlateRecord_pycore_global_strings_h_413,
+    _py_dst_dir_fd: __SlateRecord_pycore_global_strings_h_414,
+    _py_eager_start: __SlateRecord_pycore_global_strings_h_415,
+    _py_effective_ids: __SlateRecord_pycore_global_strings_h_416,
+    _py_element_factory: __SlateRecord_pycore_global_strings_h_417,
+    _py_encode: __SlateRecord_pycore_global_strings_h_418,
+    _py_encoding: __SlateRecord_pycore_global_strings_h_419,
+    _py_end: __SlateRecord_pycore_global_strings_h_420,
+    _py_end_col_offset: __SlateRecord_pycore_global_strings_h_421,
+    _py_end_lineno: __SlateRecord_pycore_global_strings_h_422,
+    _py_end_offset: __SlateRecord_pycore_global_strings_h_423,
+    _py_endpos: __SlateRecord_pycore_global_strings_h_424,
+    _py_entrypoint: __SlateRecord_pycore_global_strings_h_425,
+    _py_env: __SlateRecord_pycore_global_strings_h_426,
+    _py_errors: __SlateRecord_pycore_global_strings_h_427,
+    _py_event: __SlateRecord_pycore_global_strings_h_428,
+    _py_eventmask: __SlateRecord_pycore_global_strings_h_429,
+    _py_exc_type: __SlateRecord_pycore_global_strings_h_430,
+    _py_exc_value: __SlateRecord_pycore_global_strings_h_431,
+    _py_excepthook: __SlateRecord_pycore_global_strings_h_432,
+    _py_exception: __SlateRecord_pycore_global_strings_h_433,
+    _py_existing_file_name: __SlateRecord_pycore_global_strings_h_434,
+    _py_exp: __SlateRecord_pycore_global_strings_h_435,
+    _py_expression: __SlateRecord_pycore_global_strings_h_436,
+    _py_extend: __SlateRecord_pycore_global_strings_h_437,
+    _py_extra_tokens: __SlateRecord_pycore_global_strings_h_438,
+    _py_facility: __SlateRecord_pycore_global_strings_h_439,
+    _py_factory: __SlateRecord_pycore_global_strings_h_440,
+    _py_false: __SlateRecord_pycore_global_strings_h_441,
+    _py_family: __SlateRecord_pycore_global_strings_h_442,
+    _py_fanout: __SlateRecord_pycore_global_strings_h_443,
+    _py_fd: __SlateRecord_pycore_global_strings_h_444,
+    _py_fd2: __SlateRecord_pycore_global_strings_h_445,
+    _py_fdel: __SlateRecord_pycore_global_strings_h_446,
+    _py_fget: __SlateRecord_pycore_global_strings_h_447,
+    _py_fields: __SlateRecord_pycore_global_strings_h_448,
+    _py_file: __SlateRecord_pycore_global_strings_h_449,
+    _py_file_actions: __SlateRecord_pycore_global_strings_h_450,
+    _py_filename: __SlateRecord_pycore_global_strings_h_451,
+    _py_fileno: __SlateRecord_pycore_global_strings_h_452,
+    _py_filepath: __SlateRecord_pycore_global_strings_h_453,
+    _py_fillvalue: __SlateRecord_pycore_global_strings_h_454,
+    _py_filter: __SlateRecord_pycore_global_strings_h_455,
+    _py_filters: __SlateRecord_pycore_global_strings_h_456,
+    _py_final: __SlateRecord_pycore_global_strings_h_457,
+    _py_find_class: __SlateRecord_pycore_global_strings_h_458,
+    _py_fix_imports: __SlateRecord_pycore_global_strings_h_459,
+    _py_flags: __SlateRecord_pycore_global_strings_h_460,
+    _py_flush: __SlateRecord_pycore_global_strings_h_461,
+    _py_fold: __SlateRecord_pycore_global_strings_h_462,
+    _py_follow_symlinks: __SlateRecord_pycore_global_strings_h_463,
+    _py_format: __SlateRecord_pycore_global_strings_h_464,
+    _py_format_spec: __SlateRecord_pycore_global_strings_h_465,
+    _py_frame_buffer: __SlateRecord_pycore_global_strings_h_466,
+    _py_from_param: __SlateRecord_pycore_global_strings_h_467,
+    _py_fromlist: __SlateRecord_pycore_global_strings_h_468,
+    _py_fromtimestamp: __SlateRecord_pycore_global_strings_h_469,
+    _py_fromutc: __SlateRecord_pycore_global_strings_h_470,
+    _py_fset: __SlateRecord_pycore_global_strings_h_471,
+    _py_func: __SlateRecord_pycore_global_strings_h_472,
+    _py_future: __SlateRecord_pycore_global_strings_h_473,
+    _py_generation: __SlateRecord_pycore_global_strings_h_474,
+    _py_genexpr: __SlateRecord_pycore_global_strings_h_475,
+    _py_get: __SlateRecord_pycore_global_strings_h_476,
+    _py_get_debug: __SlateRecord_pycore_global_strings_h_477,
+    _py_get_event_loop: __SlateRecord_pycore_global_strings_h_478,
+    _py_get_loop: __SlateRecord_pycore_global_strings_h_479,
+    _py_get_source: __SlateRecord_pycore_global_strings_h_480,
+    _py_getattr: __SlateRecord_pycore_global_strings_h_481,
+    _py_getstate: __SlateRecord_pycore_global_strings_h_482,
+    _py_gid: __SlateRecord_pycore_global_strings_h_483,
+    _py_globals: __SlateRecord_pycore_global_strings_h_484,
+    _py_groupindex: __SlateRecord_pycore_global_strings_h_485,
+    _py_groups: __SlateRecord_pycore_global_strings_h_486,
+    _py_handle: __SlateRecord_pycore_global_strings_h_487,
+    _py_handle_seq: __SlateRecord_pycore_global_strings_h_488,
+    _py_has_location: __SlateRecord_pycore_global_strings_h_489,
+    _py_hash_name: __SlateRecord_pycore_global_strings_h_490,
+    _py_header: __SlateRecord_pycore_global_strings_h_491,
+    _py_headers: __SlateRecord_pycore_global_strings_h_492,
+    _py_hi: __SlateRecord_pycore_global_strings_h_493,
+    _py_hook: __SlateRecord_pycore_global_strings_h_494,
+    _py_hour: __SlateRecord_pycore_global_strings_h_495,
+    _py_id: __SlateRecord_pycore_global_strings_h_496,
+    _py_ident: __SlateRecord_pycore_global_strings_h_497,
+    _py_identity_hint: __SlateRecord_pycore_global_strings_h_498,
+    _py_ignore: __SlateRecord_pycore_global_strings_h_499,
+    _py_imag: __SlateRecord_pycore_global_strings_h_500,
+    _py_importlib: __SlateRecord_pycore_global_strings_h_501,
+    _py_in_fd: __SlateRecord_pycore_global_strings_h_502,
+    _py_incoming: __SlateRecord_pycore_global_strings_h_503,
+    _py_index: __SlateRecord_pycore_global_strings_h_504,
+    _py_indexgroup: __SlateRecord_pycore_global_strings_h_505,
+    _py_inf: __SlateRecord_pycore_global_strings_h_506,
+    _py_infer_variance: __SlateRecord_pycore_global_strings_h_507,
+    _py_inherit_handle: __SlateRecord_pycore_global_strings_h_508,
+    _py_inheritable: __SlateRecord_pycore_global_strings_h_509,
+    _py_initial: __SlateRecord_pycore_global_strings_h_510,
+    _py_initial_bytes: __SlateRecord_pycore_global_strings_h_511,
+    _py_initial_owner: __SlateRecord_pycore_global_strings_h_512,
+    _py_initial_state: __SlateRecord_pycore_global_strings_h_513,
+    _py_initial_value: __SlateRecord_pycore_global_strings_h_514,
+    _py_initval: __SlateRecord_pycore_global_strings_h_515,
+    _py_inner_size: __SlateRecord_pycore_global_strings_h_516,
+    _py_input: __SlateRecord_pycore_global_strings_h_517,
+    _py_insert_comments: __SlateRecord_pycore_global_strings_h_518,
+    _py_insert_pis: __SlateRecord_pycore_global_strings_h_519,
+    _py_instructions: __SlateRecord_pycore_global_strings_h_520,
+    _py_intern: __SlateRecord_pycore_global_strings_h_521,
+    _py_intersection: __SlateRecord_pycore_global_strings_h_522,
+    _py_interval: __SlateRecord_pycore_global_strings_h_523,
+    _py_io: __SlateRecord_pycore_global_strings_h_524,
+    _py_is_compress: __SlateRecord_pycore_global_strings_h_525,
+    _py_is_raw: __SlateRecord_pycore_global_strings_h_526,
+    _py_is_running: __SlateRecord_pycore_global_strings_h_527,
+    _py_is_struct: __SlateRecord_pycore_global_strings_h_528,
+    _py_isatty: __SlateRecord_pycore_global_strings_h_529,
+    _py_isinstance: __SlateRecord_pycore_global_strings_h_530,
+    _py_isoformat: __SlateRecord_pycore_global_strings_h_531,
+    _py_isolation_level: __SlateRecord_pycore_global_strings_h_532,
+    _py_istext: __SlateRecord_pycore_global_strings_h_533,
+    _py_item: __SlateRecord_pycore_global_strings_h_534,
+    _py_items: __SlateRecord_pycore_global_strings_h_535,
+    _py_iter: __SlateRecord_pycore_global_strings_h_536,
+    _py_iterable: __SlateRecord_pycore_global_strings_h_537,
+    _py_iterations: __SlateRecord_pycore_global_strings_h_538,
+    _py_join: __SlateRecord_pycore_global_strings_h_539,
+    _py_jump: __SlateRecord_pycore_global_strings_h_540,
+    _py_keepends: __SlateRecord_pycore_global_strings_h_541,
+    _py_key: __SlateRecord_pycore_global_strings_h_542,
+    _py_keyfile: __SlateRecord_pycore_global_strings_h_543,
+    _py_keys: __SlateRecord_pycore_global_strings_h_544,
+    _py_kind: __SlateRecord_pycore_global_strings_h_545,
+    _py_kw: __SlateRecord_pycore_global_strings_h_546,
+    _py_kw1: __SlateRecord_pycore_global_strings_h_547,
+    _py_kw2: __SlateRecord_pycore_global_strings_h_548,
+    _py_kwdefaults: __SlateRecord_pycore_global_strings_h_549,
+    _py_label: __SlateRecord_pycore_global_strings_h_550,
+    _py_lambda: __SlateRecord_pycore_global_strings_h_551,
+    _py_last: __SlateRecord_pycore_global_strings_h_552,
+    _py_last_exc: __SlateRecord_pycore_global_strings_h_553,
+    _py_last_node: __SlateRecord_pycore_global_strings_h_554,
+    _py_last_traceback: __SlateRecord_pycore_global_strings_h_555,
+    _py_last_type: __SlateRecord_pycore_global_strings_h_556,
+    _py_last_value: __SlateRecord_pycore_global_strings_h_557,
+    _py_latin1: __SlateRecord_pycore_global_strings_h_558,
+    _py_leaf_size: __SlateRecord_pycore_global_strings_h_559,
+    _py_len: __SlateRecord_pycore_global_strings_h_560,
+    _py_length: __SlateRecord_pycore_global_strings_h_561,
+    _py_level: __SlateRecord_pycore_global_strings_h_562,
+    _py_limit: __SlateRecord_pycore_global_strings_h_563,
+    _py_line: __SlateRecord_pycore_global_strings_h_564,
+    _py_line_buffering: __SlateRecord_pycore_global_strings_h_565,
+    _py_lineno: __SlateRecord_pycore_global_strings_h_566,
+    _py_listcomp: __SlateRecord_pycore_global_strings_h_567,
+    _py_little: __SlateRecord_pycore_global_strings_h_568,
+    _py_lo: __SlateRecord_pycore_global_strings_h_569,
+    _py_locale: __SlateRecord_pycore_global_strings_h_570,
+    _py_locals: __SlateRecord_pycore_global_strings_h_571,
+    _py_logoption: __SlateRecord_pycore_global_strings_h_572,
+    _py_loop: __SlateRecord_pycore_global_strings_h_573,
+    _py_manual_reset: __SlateRecord_pycore_global_strings_h_574,
+    _py_mapping: __SlateRecord_pycore_global_strings_h_575,
+    _py_match: __SlateRecord_pycore_global_strings_h_576,
+    _py_max_length: __SlateRecord_pycore_global_strings_h_577,
+    _py_maxdigits: __SlateRecord_pycore_global_strings_h_578,
+    _py_maxevents: __SlateRecord_pycore_global_strings_h_579,
+    _py_maxlen: __SlateRecord_pycore_global_strings_h_580,
+    _py_maxmem: __SlateRecord_pycore_global_strings_h_581,
+    _py_maxsplit: __SlateRecord_pycore_global_strings_h_582,
+    _py_maxvalue: __SlateRecord_pycore_global_strings_h_583,
+    _py_memLevel: __SlateRecord_pycore_global_strings_h_584,
+    _py_memlimit: __SlateRecord_pycore_global_strings_h_585,
+    _py_message: __SlateRecord_pycore_global_strings_h_586,
+    _py_metaclass: __SlateRecord_pycore_global_strings_h_587,
+    _py_metadata: __SlateRecord_pycore_global_strings_h_588,
+    _py_method: __SlateRecord_pycore_global_strings_h_589,
+    _py_microsecond: __SlateRecord_pycore_global_strings_h_590,
+    _py_milliseconds: __SlateRecord_pycore_global_strings_h_591,
+    _py_minute: __SlateRecord_pycore_global_strings_h_592,
+    _py_mod: __SlateRecord_pycore_global_strings_h_593,
+    _py_mode: __SlateRecord_pycore_global_strings_h_594,
+    _py_module: __SlateRecord_pycore_global_strings_h_595,
+    _py_module_globals: __SlateRecord_pycore_global_strings_h_596,
+    _py_modules: __SlateRecord_pycore_global_strings_h_597,
+    _py_month: __SlateRecord_pycore_global_strings_h_598,
+    _py_mro: __SlateRecord_pycore_global_strings_h_599,
+    _py_msg: __SlateRecord_pycore_global_strings_h_600,
+    _py_mutex: __SlateRecord_pycore_global_strings_h_601,
+    _py_mycmp: __SlateRecord_pycore_global_strings_h_602,
+    _py_n_arg: __SlateRecord_pycore_global_strings_h_603,
+    _py_n_fields: __SlateRecord_pycore_global_strings_h_604,
+    _py_n_sequence_fields: __SlateRecord_pycore_global_strings_h_605,
+    _py_n_unnamed_fields: __SlateRecord_pycore_global_strings_h_606,
+    _py_name: __SlateRecord_pycore_global_strings_h_607,
+    _py_name_from: __SlateRecord_pycore_global_strings_h_608,
+    _py_namespace_separator: __SlateRecord_pycore_global_strings_h_609,
+    _py_namespaces: __SlateRecord_pycore_global_strings_h_610,
+    _py_narg: __SlateRecord_pycore_global_strings_h_611,
+    _py_ndigits: __SlateRecord_pycore_global_strings_h_612,
+    _py_nested: __SlateRecord_pycore_global_strings_h_613,
+    _py_new_file_name: __SlateRecord_pycore_global_strings_h_614,
+    _py_new_limit: __SlateRecord_pycore_global_strings_h_615,
+    _py_newline: __SlateRecord_pycore_global_strings_h_616,
+    _py_newlines: __SlateRecord_pycore_global_strings_h_617,
+    _py_next: __SlateRecord_pycore_global_strings_h_618,
+    _py_nlocals: __SlateRecord_pycore_global_strings_h_619,
+    _py_node_depth: __SlateRecord_pycore_global_strings_h_620,
+    _py_node_offset: __SlateRecord_pycore_global_strings_h_621,
+    _py_ns: __SlateRecord_pycore_global_strings_h_622,
+    _py_nstype: __SlateRecord_pycore_global_strings_h_623,
+    _py_nt: __SlateRecord_pycore_global_strings_h_624,
+    _py_null: __SlateRecord_pycore_global_strings_h_625,
+    _py_number: __SlateRecord_pycore_global_strings_h_626,
+    _py_obj: __SlateRecord_pycore_global_strings_h_627,
+    _py_object: __SlateRecord_pycore_global_strings_h_628,
+    _py_offset: __SlateRecord_pycore_global_strings_h_629,
+    _py_offset_dst: __SlateRecord_pycore_global_strings_h_630,
+    _py_offset_src: __SlateRecord_pycore_global_strings_h_631,
+    _py_on_type_read: __SlateRecord_pycore_global_strings_h_632,
+    _py_onceregistry: __SlateRecord_pycore_global_strings_h_633,
+    _py_only_active_thread: __SlateRecord_pycore_global_strings_h_634,
+    _py_only_keys: __SlateRecord_pycore_global_strings_h_635,
+    _py_oparg: __SlateRecord_pycore_global_strings_h_636,
+    _py_opcode: __SlateRecord_pycore_global_strings_h_637,
+    _py_open: __SlateRecord_pycore_global_strings_h_638,
+    _py_opener: __SlateRecord_pycore_global_strings_h_639,
+    _py_operation: __SlateRecord_pycore_global_strings_h_640,
+    _py_optimize: __SlateRecord_pycore_global_strings_h_641,
+    _py_options: __SlateRecord_pycore_global_strings_h_642,
+    _py_order: __SlateRecord_pycore_global_strings_h_643,
+    _py_origin: __SlateRecord_pycore_global_strings_h_644,
+    _py_out_fd: __SlateRecord_pycore_global_strings_h_645,
+    _py_outgoing: __SlateRecord_pycore_global_strings_h_646,
+    _py_outpath: __SlateRecord_pycore_global_strings_h_647,
+    _py_overlapped: __SlateRecord_pycore_global_strings_h_648,
+    _py_owner: __SlateRecord_pycore_global_strings_h_649,
+    _py_pages: __SlateRecord_pycore_global_strings_h_650,
+    _py_parameter: __SlateRecord_pycore_global_strings_h_651,
+    _py_parent: __SlateRecord_pycore_global_strings_h_652,
+    _py_password: __SlateRecord_pycore_global_strings_h_653,
+    _py_path: __SlateRecord_pycore_global_strings_h_654,
+    _py_pattern: __SlateRecord_pycore_global_strings_h_655,
+    _py_peek: __SlateRecord_pycore_global_strings_h_656,
+    _py_persistent_id: __SlateRecord_pycore_global_strings_h_657,
+    _py_persistent_load: __SlateRecord_pycore_global_strings_h_658,
+    _py_person: __SlateRecord_pycore_global_strings_h_659,
+    _py_pi_factory: __SlateRecord_pycore_global_strings_h_660,
+    _py_pid: __SlateRecord_pycore_global_strings_h_661,
+    _py_policy: __SlateRecord_pycore_global_strings_h_662,
+    _py_pos: __SlateRecord_pycore_global_strings_h_663,
+    _py_pos1: __SlateRecord_pycore_global_strings_h_664,
+    _py_pos2: __SlateRecord_pycore_global_strings_h_665,
+    _py_posix: __SlateRecord_pycore_global_strings_h_666,
+    _py_print_file_and_line: __SlateRecord_pycore_global_strings_h_667,
+    _py_priority: __SlateRecord_pycore_global_strings_h_668,
+    _py_progress: __SlateRecord_pycore_global_strings_h_669,
+    _py_progress_handler: __SlateRecord_pycore_global_strings_h_670,
+    _py_progress_routine: __SlateRecord_pycore_global_strings_h_671,
+    _py_proto: __SlateRecord_pycore_global_strings_h_672,
+    _py_protocol: __SlateRecord_pycore_global_strings_h_673,
+    _py_ps1: __SlateRecord_pycore_global_strings_h_674,
+    _py_ps2: __SlateRecord_pycore_global_strings_h_675,
+    _py_query: __SlateRecord_pycore_global_strings_h_676,
+    _py_quotetabs: __SlateRecord_pycore_global_strings_h_677,
+    _py_raw: __SlateRecord_pycore_global_strings_h_678,
+    _py_read: __SlateRecord_pycore_global_strings_h_679,
+    _py_read1: __SlateRecord_pycore_global_strings_h_680,
+    _py_readable: __SlateRecord_pycore_global_strings_h_681,
+    _py_readall: __SlateRecord_pycore_global_strings_h_682,
+    _py_readinto: __SlateRecord_pycore_global_strings_h_683,
+    _py_readinto1: __SlateRecord_pycore_global_strings_h_684,
+    _py_readline: __SlateRecord_pycore_global_strings_h_685,
+    _py_readonly: __SlateRecord_pycore_global_strings_h_686,
+    _py_real: __SlateRecord_pycore_global_strings_h_687,
+    _py_reducer_override: __SlateRecord_pycore_global_strings_h_688,
+    _py_registry: __SlateRecord_pycore_global_strings_h_689,
+    _py_rel_tol: __SlateRecord_pycore_global_strings_h_690,
+    _py_release: __SlateRecord_pycore_global_strings_h_691,
+    _py_reload: __SlateRecord_pycore_global_strings_h_692,
+    _py_repl: __SlateRecord_pycore_global_strings_h_693,
+    _py_replace: __SlateRecord_pycore_global_strings_h_694,
+    _py_reserved: __SlateRecord_pycore_global_strings_h_695,
+    _py_reset: __SlateRecord_pycore_global_strings_h_696,
+    _py_resetids: __SlateRecord_pycore_global_strings_h_697,
+    _py_return: __SlateRecord_pycore_global_strings_h_698,
+    _py_reverse: __SlateRecord_pycore_global_strings_h_699,
+    _py_reversed: __SlateRecord_pycore_global_strings_h_700,
+    _py_salt: __SlateRecord_pycore_global_strings_h_701,
+    _py_sched_priority: __SlateRecord_pycore_global_strings_h_702,
+    _py_scheduler: __SlateRecord_pycore_global_strings_h_703,
+    _py_script: __SlateRecord_pycore_global_strings_h_704,
+    _py_second: __SlateRecord_pycore_global_strings_h_705,
+    _py_security_attributes: __SlateRecord_pycore_global_strings_h_706,
+    _py_seek: __SlateRecord_pycore_global_strings_h_707,
+    _py_seekable: __SlateRecord_pycore_global_strings_h_708,
+    _py_selectors: __SlateRecord_pycore_global_strings_h_709,
+    _py_self: __SlateRecord_pycore_global_strings_h_710,
+    _py_send: __SlateRecord_pycore_global_strings_h_711,
+    _py_sep: __SlateRecord_pycore_global_strings_h_712,
+    _py_sequence: __SlateRecord_pycore_global_strings_h_713,
+    _py_server_hostname: __SlateRecord_pycore_global_strings_h_714,
+    _py_server_side: __SlateRecord_pycore_global_strings_h_715,
+    _py_session: __SlateRecord_pycore_global_strings_h_716,
+    _py_setcomp: __SlateRecord_pycore_global_strings_h_717,
+    _py_setpgroup: __SlateRecord_pycore_global_strings_h_718,
+    _py_setsid: __SlateRecord_pycore_global_strings_h_719,
+    _py_setsigdef: __SlateRecord_pycore_global_strings_h_720,
+    _py_setsigmask: __SlateRecord_pycore_global_strings_h_721,
+    _py_setstate: __SlateRecord_pycore_global_strings_h_722,
+    _py_shape: __SlateRecord_pycore_global_strings_h_723,
+    _py_show_cmd: __SlateRecord_pycore_global_strings_h_724,
+    _py_signed: __SlateRecord_pycore_global_strings_h_725,
+    _py_size: __SlateRecord_pycore_global_strings_h_726,
+    _py_sizehint: __SlateRecord_pycore_global_strings_h_727,
+    _py_skip_file_prefixes: __SlateRecord_pycore_global_strings_h_728,
+    _py_sleep: __SlateRecord_pycore_global_strings_h_729,
+    _py_sock: __SlateRecord_pycore_global_strings_h_730,
+    _py_sort: __SlateRecord_pycore_global_strings_h_731,
+    _py_source: __SlateRecord_pycore_global_strings_h_732,
+    _py_source_traceback: __SlateRecord_pycore_global_strings_h_733,
+    _py_spam: __SlateRecord_pycore_global_strings_h_734,
+    _py_src: __SlateRecord_pycore_global_strings_h_735,
+    _py_src_dir_fd: __SlateRecord_pycore_global_strings_h_736,
+    _py_stacklevel: __SlateRecord_pycore_global_strings_h_737,
+    _py_start: __SlateRecord_pycore_global_strings_h_738,
+    _py_statement: __SlateRecord_pycore_global_strings_h_739,
+    _py_status: __SlateRecord_pycore_global_strings_h_740,
+    _py_stderr: __SlateRecord_pycore_global_strings_h_741,
+    _py_stdin: __SlateRecord_pycore_global_strings_h_742,
+    _py_stdout: __SlateRecord_pycore_global_strings_h_743,
+    _py_step: __SlateRecord_pycore_global_strings_h_744,
+    _py_steps: __SlateRecord_pycore_global_strings_h_745,
+    _py_store_name: __SlateRecord_pycore_global_strings_h_746,
+    _py_strategy: __SlateRecord_pycore_global_strings_h_747,
+    _py_strftime: __SlateRecord_pycore_global_strings_h_748,
+    _py_strict: __SlateRecord_pycore_global_strings_h_749,
+    _py_strict_mode: __SlateRecord_pycore_global_strings_h_750,
+    _py_string: __SlateRecord_pycore_global_strings_h_751,
+    _py_sub_key: __SlateRecord_pycore_global_strings_h_752,
+    _py_subcalls: __SlateRecord_pycore_global_strings_h_753,
+    _py_symmetric_difference_update: __SlateRecord_pycore_global_strings_h_754,
+    _py_tabsize: __SlateRecord_pycore_global_strings_h_755,
+    _py_tag: __SlateRecord_pycore_global_strings_h_756,
+    _py_target: __SlateRecord_pycore_global_strings_h_757,
+    _py_target_is_directory: __SlateRecord_pycore_global_strings_h_758,
+    _py_task: __SlateRecord_pycore_global_strings_h_759,
+    _py_tb_frame: __SlateRecord_pycore_global_strings_h_760,
+    _py_tb_lasti: __SlateRecord_pycore_global_strings_h_761,
+    _py_tb_lineno: __SlateRecord_pycore_global_strings_h_762,
+    _py_tb_next: __SlateRecord_pycore_global_strings_h_763,
+    _py_tell: __SlateRecord_pycore_global_strings_h_764,
+    _py_template: __SlateRecord_pycore_global_strings_h_765,
+    _py_term: __SlateRecord_pycore_global_strings_h_766,
+    _py_text: __SlateRecord_pycore_global_strings_h_767,
+    _py_threading: __SlateRecord_pycore_global_strings_h_768,
+    _py_throw: __SlateRecord_pycore_global_strings_h_769,
+    _py_timeout: __SlateRecord_pycore_global_strings_h_770,
+    _py_timer: __SlateRecord_pycore_global_strings_h_771,
+    _py_times: __SlateRecord_pycore_global_strings_h_772,
+    _py_timetuple: __SlateRecord_pycore_global_strings_h_773,
+    _py_timeunit: __SlateRecord_pycore_global_strings_h_774,
+    _py_top: __SlateRecord_pycore_global_strings_h_775,
+    _py_trace_callback: __SlateRecord_pycore_global_strings_h_776,
+    _py_traceback: __SlateRecord_pycore_global_strings_h_777,
+    _py_trailers: __SlateRecord_pycore_global_strings_h_778,
+    _py_translate: __SlateRecord_pycore_global_strings_h_779,
+    _py_true: __SlateRecord_pycore_global_strings_h_780,
+    _py_truncate: __SlateRecord_pycore_global_strings_h_781,
+    _py_twice: __SlateRecord_pycore_global_strings_h_782,
+    _py_txt: __SlateRecord_pycore_global_strings_h_783,
+    _py_type: __SlateRecord_pycore_global_strings_h_784,
+    _py_type_params: __SlateRecord_pycore_global_strings_h_785,
+    _py_tz: __SlateRecord_pycore_global_strings_h_786,
+    _py_tzinfo: __SlateRecord_pycore_global_strings_h_787,
+    _py_tzname: __SlateRecord_pycore_global_strings_h_788,
+    _py_uid: __SlateRecord_pycore_global_strings_h_789,
+    _py_unlink: __SlateRecord_pycore_global_strings_h_790,
+    _py_unraisablehook: __SlateRecord_pycore_global_strings_h_791,
+    _py_uri: __SlateRecord_pycore_global_strings_h_792,
+    _py_usedforsecurity: __SlateRecord_pycore_global_strings_h_793,
+    _py_value: __SlateRecord_pycore_global_strings_h_794,
+    _py_values: __SlateRecord_pycore_global_strings_h_795,
+    _py_version: __SlateRecord_pycore_global_strings_h_796,
+    _py_volume: __SlateRecord_pycore_global_strings_h_797,
+    _py_wait_all: __SlateRecord_pycore_global_strings_h_798,
+    _py_warn_on_full_buffer: __SlateRecord_pycore_global_strings_h_799,
+    _py_warnings: __SlateRecord_pycore_global_strings_h_800,
+    _py_warnoptions: __SlateRecord_pycore_global_strings_h_801,
+    _py_wbits: __SlateRecord_pycore_global_strings_h_802,
+    _py_week: __SlateRecord_pycore_global_strings_h_803,
+    _py_weekday: __SlateRecord_pycore_global_strings_h_804,
+    _py_which: __SlateRecord_pycore_global_strings_h_805,
+    _py_who: __SlateRecord_pycore_global_strings_h_806,
+    _py_withdata: __SlateRecord_pycore_global_strings_h_807,
+    _py_writable: __SlateRecord_pycore_global_strings_h_808,
+    _py_write: __SlateRecord_pycore_global_strings_h_809,
+    _py_write_through: __SlateRecord_pycore_global_strings_h_810,
+    _py_year: __SlateRecord_pycore_global_strings_h_811,
+    _py_zdict: __SlateRecord_pycore_global_strings_h_812,
+    _py_zstd_dict: __SlateRecord_pycore_global_strings_h_813,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_59 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_60 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_61 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_62 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_63 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_64 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_65 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_66 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_67 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_68 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_69 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_70 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_71 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_72 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 20],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_73 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_74 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_75 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_76 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_77 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_78 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_79 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_80 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_81 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_82 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_83 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 22],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_84 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_85 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_86 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_87 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_88 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_89 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_90 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_91 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_92 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_93 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_94 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_95 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_96 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_97 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_98 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_99 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_100 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_101 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 28],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_102 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_103 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 25],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_104 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_105 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_106 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_107 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_108 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_109 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_110 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_111 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_112 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_113 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_114 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_115 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_116 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_117 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_118 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_119 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_120 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_121 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_122 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_123 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_124 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_125 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_126 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_127 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_128 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_129 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_130 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_131 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_132 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_133 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_134 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_135 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_136 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_137 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_138 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_139 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_140 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_141 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_142 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_143 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_144 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_145 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_146 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_147 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_148 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_149 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_150 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_151 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 21],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_152 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_153 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_154 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_155 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_156 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_157 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_158 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_159 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_160 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_161 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_162 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_163 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_164 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_165 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_166 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_167 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_168 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_169 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_170 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_171 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_172 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_173 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_174 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_175 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_176 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_177 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_178 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_179 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_180 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_181 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_182 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_183 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_184 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_185 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_186 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_187 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_188 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_189 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_190 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_191 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_192 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_193 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_194 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 19],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_195 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_196 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_197 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_198 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_199 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_200 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_201 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_202 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_203 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_204 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_205 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_206 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_207 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_208 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_209 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_210 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_211 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_212 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_213 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_214 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_215 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_216 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_217 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_218 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_219 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 22],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_220 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_221 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_222 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_223 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_224 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_225 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_226 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_227 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 36],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_228 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 25],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_229 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_230 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 31],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_231 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 20],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_232 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 19],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_233 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_234 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_235 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_236 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_237 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_238 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_239 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_240 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_241 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 25],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_242 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_243 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_244 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_245 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_246 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_247 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_248 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_249 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_250 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_251 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_252 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_253 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_254 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_255 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_256 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_257 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_258 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_259 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_260 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_261 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_262 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_263 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 20],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_264 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_265 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 19],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_266 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_267 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_268 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_269 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_270 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_271 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_272 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 24],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_273 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 28],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_274 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 24],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_275 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_276 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 26],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_277 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 26],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_278 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_279 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_280 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_281 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_282 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_283 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_284 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_285 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_286 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_287 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_288 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_289 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_290 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_291 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_292 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_293 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_294 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_295 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_296 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_297 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_298 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_299 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_300 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_301 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_302 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_303 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_304 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 20],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_305 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_306 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_307 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_308 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_309 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_310 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_311 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_312 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_313 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_314 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_315 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_316 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_317 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_318 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_319 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_320 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_321 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_322 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_323 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_324 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_325 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_326 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_327 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_328 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_329 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_330 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_331 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 23],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_332 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_333 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_334 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_335 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_336 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 23],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_337 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_338 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_339 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_340 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_341 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_342 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_343 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_344 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_345 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_346 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_347 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_348 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_349 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_350 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_351 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_352 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_353 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_354 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_355 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_356 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_357 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_358 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_359 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_360 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_361 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_362 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_363 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_364 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 19],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_365 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_366 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_367 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_368 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_369 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_370 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_371 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_372 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_373 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_374 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_375 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_376 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_377 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_378 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_379 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_380 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_381 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_382 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_383 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_384 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_385 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_386 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_387 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_388 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_389 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_390 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_391 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_392 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_393 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_394 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_395 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_396 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_397 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_398 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_399 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_400 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_401 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_402 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_403 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_404 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_405 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_406 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_407 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_408 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_409 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_410 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_411 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_412 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_413 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_414 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_415 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_416 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_417 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_418 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_419 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_420 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_421 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_422 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_423 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_424 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_425 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_426 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_427 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_428 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_429 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_430 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_431 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_432 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_433 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_434 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 19],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_435 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_436 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_437 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_438 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_439 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_440 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_441 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_442 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_443 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_444 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_445 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_446 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_447 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_448 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_449 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_450 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_451 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_452 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_453 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_454 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_455 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_456 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_457 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_458 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_459 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_460 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_461 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_462 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_463 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_464 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_465 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_466 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_467 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_468 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_469 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_470 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_471 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_472 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_473 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_474 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_475 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_476 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_477 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_478 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_479 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_480 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_481 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_482 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_483 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_484 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_485 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_486 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_487 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_488 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_489 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_490 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_491 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_492 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_493 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_494 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_495 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_496 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_497 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_498 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_499 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_500 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_501 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_502 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_503 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_504 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_505 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_506 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_507 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_508 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_509 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_510 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_511 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_512 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_513 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_514 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_515 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_516 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_517 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_518 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_519 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_520 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_521 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_522 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_523 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_524 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_525 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_526 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_527 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_528 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_529 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_530 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_531 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_532 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_533 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_534 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_535 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_536 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_537 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_538 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_539 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_540 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_541 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_542 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_543 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_544 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_545 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_546 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_547 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_548 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_549 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_550 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_551 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_552 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_553 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_554 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_555 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_556 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_557 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_558 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_559 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_560 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_561 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_562 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_563 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_564 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_565 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_566 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_567 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_568 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_569 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_570 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_571 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_572 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_573 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_574 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_575 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_576 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_577 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_578 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_579 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_580 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_581 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_582 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_583 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_584 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_585 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_586 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_587 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_588 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_589 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_590 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_591 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_592 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_593 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_594 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_595 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_596 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_597 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_598 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_599 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_600 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_601 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_602 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_603 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_604 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_605 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 18],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_606 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_607 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_608 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_609 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 20],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_610 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_611 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_612 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_613 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_614 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_615 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_616 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_617 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_618 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_619 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_620 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_621 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_622 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_623 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_624 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_625 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_626 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_627 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_628 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_629 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_630 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_631 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_632 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_633 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 13],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_634 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 19],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_635 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_636 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_637 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_638 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_639 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_640 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_641 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_642 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_643 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_644 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_645 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_646 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_647 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_648 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_649 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_650 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_651 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_652 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_653 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_654 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_655 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_656 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_657 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_658 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_659 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_660 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_661 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_662 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_663 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_664 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_665 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_666 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_667 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 20],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_668 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_669 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_670 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_671 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_672 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_673 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_674 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_675 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_676 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_677 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_678 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_679 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_680 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_681 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_682 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_683 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_684 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_685 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_686 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_687 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_688 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_689 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_690 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_691 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_692 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_693 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_694 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_695 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_696 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_697 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_698 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_699 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_700 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_701 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_702 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_703 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_704 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_705 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_706 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 20],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_707 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_708 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_709 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_710 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_711 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_712 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_713 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_714 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_715 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_716 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_717 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_718 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_719 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_720 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_721 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_722 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_723 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_724 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_725 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_726 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_727 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_728 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 19],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_729 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_730 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_731 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_732 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_733 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 17],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_734 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_735 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_736 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_737 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_738 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_739 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_740 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_741 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_742 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_743 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_744 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_745 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_746 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 11],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_747 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_748 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_749 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_750 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_751 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_752 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_753 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_754 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 28],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_755 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_756 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_757 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_758 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 20],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_759 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_760 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_761 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_762 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_763 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_764 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_765 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_766 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_767 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_768 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_769 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_770 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_771 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_772 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_773 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_774 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_775 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_776 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_777 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_778 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_779 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_780 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_781 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_782 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_783 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_784 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_785 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_786 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_787 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_788 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_789 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_790 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_791 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 15],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_792 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_793 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_794 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_795 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_796 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_797 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 7],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_798 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_799 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 20],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_800 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_801 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_802 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_803 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_804 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_805 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_806 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_807 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_808 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 9],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_809 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_810 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 14],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_811 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 5],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_812 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_813 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_815 {
+    _ascii: __SlateRecord_unicodeobject_h_163,
+    _data: [u8; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_global_strings_h_819 {
+    _latin1: __SlateRecord_unicodeobject_h_173,
+    _data: [u8; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _PyTraceMalloc_Config {
+    initialized: u32,
+    tracing: i32,
+    max_nframe: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_runtime_structs_h_115 {
+    small_ints: [_longobject; 262],
+    bytes_empty: __SlateRecord_bytesobject_h_15,
+    bytes_characters: [__SlateRecord_pycore_runtime_structs_h_124; 256],
+    strings: _Py_global_strings,
+    _tuple_empty_gc_not_used: __SlateRecord_pycore_interp_structs_h_170,
+    tuple_empty: __SlateRecord_tupleobject_h_13,
+    _hamt_bitmap_node_empty_gc_not_used: __SlateRecord_pycore_interp_structs_h_170,
+    hamt_bitmap_node_empty: __SlateRecord_pycore_structs_h_53,
+    context_token_missing: __SlateRecord_pycore_context_h_21,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_runtime_structs_h_124 {
+    ob: __SlateRecord_bytesobject_h_15,
+    eos: i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct pyinterpreters {
+    mutex: PyMutex,
+    head: *mut _is,
+    main: *mut _is,
+    next_id: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _gilstate_runtime_state {
+    check_enabled: i32,
+    autoInterpreterState: *mut _is,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _getargs_runtime_state {
+    static_parsers: *mut _PyArg_Parser,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_runtime_structs_h_271 {
+    mutex: PyMutex,
+    head: *mut _Py_AuditHookEntry,
+}
+
+#[repr(C, packed)]
+#[derive(Clone, Copy)]
+struct tracemalloc_frame {
+    filename: *mut _object,
+    lineno: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct tracemalloc_traceback {
+    hash: u64,
+    nframe: u16,
+    total_nframe: u16,
+    frames: [tracemalloc_frame; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_ext_module_loader_result_error {
+    kind: u32,
+    exc: *mut _object,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_import_c_h_205 {
+    _this_is_not_used: __SlateRecord_pycore_interp_structs_h_170,
+    ob_base: __SlateRecord_object_h_172,
+    ob_hash: i64,
+    ob_item: [*mut _object; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_import_c_h_580 {
+    _this_is_not_used: __SlateRecord_pycore_interp_structs_h_170,
+    ob_base: __SlateRecord_object_h_172,
+    ob_hash: i64,
+    ob_item: [*mut _object; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _tracemalloc_runtime_state {
+    config: _PyTraceMalloc_Config,
+    allocators: __SlateRecord_pycore_tracemalloc_h_70,
+    tables_lock: PyMutex,
+    traced_memory: u64,
+    peak_traced_memory: u64,
+    filenames: *mut _Py_hashtable_t,
+    traceback: *mut tracemalloc_traceback,
+    tracebacks: *mut _Py_hashtable_t,
+    traces: *mut _Py_hashtable_t,
+    domains: *mut _Py_hashtable_t,
+    empty_traceback: tracemalloc_traceback,
+    reentrant_key: _Py_tss_t,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _fileutils_state {
+    force_ascii: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _PyInterpreterFrame {
+    f_executable: _PyStackRef,
+    previous: *mut _PyInterpreterFrame,
+    f_funcobj: _PyStackRef,
+    f_globals: *mut _object,
+    f_builtins: *mut _object,
+    f_locals: *mut _object,
+    frame_obj: *mut _frame,
+    instr_ptr: *mut __SlateRecord_pycore_structs_h_32,
+    stackpointer: *mut _PyStackRef,
+    return_offset: u16,
+    owner: i8,
+    visited: u8,
+    localsplus: [_PyStackRef; 1],
+}
+
+// _PyGenObject_HEAD defines the initial segment of generator
+// and coroutine objects.
+// List of weak reference.
+// Name of the generator.
+// Qualified name of the generator.
+// The frame
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_DebugOffsets {
+    cookie: [i8; 8],
+    version: u64,
+    free_threaded: u64,
+    runtime_state: _runtime_state,
+    interpreter_state: _interpreter_state,
+    thread_state: _thread_state,
+    interpreter_frame: _interpreter_frame,
+    code_object: _code_object,
+    pyobject: _pyobject,
+    type_object: _type_object,
+    tuple_object: _tuple_object,
+    list_object: _list_object,
+    set_object: _set_object,
+    dict_object: _dict_object,
+    float_object: _float_object,
+    long_object: _long_object,
+    bytes_object: _bytes_object,
+    unicode_object: _unicode_object,
+    gc: _gc,
+    gen_object: _gen_object,
+    llist_node: _llist_node,
+    debugger_support: _debugger_support,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __SlateRecord_import_c_4895 {
+    x: u64,
+    data: [i8; 8],
+}
+
+#[repr(C, align(16))]
+struct __SlateAlign16<T>(T);
+
+unsafe impl<T> Sync for __SlateAlign16<T> {}
+
+mod __slate_bits {
+    #[bitfields::bitfield(
+        u32,
+        c_names = true,
+        new = false,
+        from_into_bits = false,
+        from_traits = false,
+        default = false,
+        debug = false,
+        builder = false,
+        bit_ops = false
+    )]
+    pub struct __SlateBits139U0 {
+        #[bits(2)]
+        pub interned: u32,
+        #[bits(3)]
+        pub kind: u32,
+        #[bits(1)]
+        pub compact: u32,
+        #[bits(1)]
+        pub ascii: u32,
+        #[bits(1)]
+        pub statically_allocated: u32,
+        #[bits(24, access = na)]
+        pub __slate_pad_5: u32,
+    }
+    #[bitfields::bitfield(
+        u32,
+        c_names = true,
+        new = false,
+        from_into_bits = false,
+        from_traits = false,
+        default = false,
+        debug = false,
+        builder = false,
+        bit_ops = false
+    )]
+    pub struct __SlateBits192U0 {
+        #[bits(1)]
+        pub initialized: u32,
+        #[bits(1)]
+        pub bound: u32,
+        #[bits(1)]
+        pub unbound: u32,
+        #[bits(1)]
+        pub bound_gilstate: u32,
+        #[bits(1)]
+        pub active: u32,
+        #[bits(1)]
+        pub finalizing: u32,
+        #[bits(1)]
+        pub cleared: u32,
+        #[bits(1)]
+        pub finalized: u32,
+        #[bits(24, access = na)]
+        pub __slate_pad_8: u32,
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union sigval {
+    sival_int: i32,
+    sival_ptr: *mut (),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_siginfo_t_h_124 {
+    si_signo: i32,
+    si_errno: i32,
+    si_code: i32,
+    __pad0: i32,
+    _sifields: __SlateRecord_siginfo_t_h_124_2,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct sigaction {
+    __sigaction_handler: __SlateRecord_sigaction_h_31,
+    sa_mask: __SlateRecord___sigset_t_h_8,
+    sa_flags: i32,
+    sa_restorer: Option<unsafe extern "C-unwind" fn()>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_stack_t_h_31 {
+    ss_sp: *mut (),
+    ss_flags: i32,
+    ss_size: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _signals_runtime_state {
+    handlers: [__SlateRecord_pycore_signal_h_40; 65],
+    wakeup: __SlateRecord_pycore_signal_h_46,
+    is_tripped: i32,
+    default_handler: *mut _object,
+    ignore_handler: *mut _object,
+    unhandled_keyboard_interrupt: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct faulthandler_user_signal {
+    enabled: i32,
+    file: *mut _object,
+    fd: i32,
+    all_threads: i32,
+    chain: i32,
+    previous: sigaction,
+    interp: *mut _is,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _faulthandler_runtime_state {
+    fatal_error: __SlateRecord_pycore_faulthandler_h_50,
+    thread: __SlateRecord_pycore_faulthandler_h_62,
+    user_signals: *mut faulthandler_user_signal,
+    stack: __SlateRecord_stack_t_h_31,
+    old_stack: __SlateRecord_stack_t_h_31,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_asdl_h_45 {
+    size: i64,
+    elements: *mut *mut (),
+    typed_elements: [i32; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_74 {
+    size: i64,
+    elements: *mut *mut (),
+    typed_elements: [*mut _expr; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_81 {
+    size: i64,
+    elements: *mut *mut (),
+    typed_elements: [*mut _comprehension; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_104 {
+    size: i64,
+    elements: *mut *mut (),
+    typed_elements: [*mut _arg; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __SlateRecord_pycore_ast_h_111 {
+    size: i64,
+    elements: *mut *mut (),
+    typed_elements: [*mut _keyword; 1],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _expr {
+    kind: u32,
+    v: __SlateRecord_pycore_ast_h_370,
+    lineno: i32,
+    col_offset: i32,
+    end_lineno: i32,
+    end_col_offset: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _comprehension {
+    target: *mut _expr,
+    iter: *mut _expr,
+    ifs: *mut __SlateRecord_pycore_ast_h_74,
+    is_async: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _arguments {
+    posonlyargs: *mut __SlateRecord_pycore_ast_h_104,
+    args: *mut __SlateRecord_pycore_ast_h_104,
+    vararg: *mut _arg,
+    kwonlyargs: *mut __SlateRecord_pycore_ast_h_104,
+    kw_defaults: *mut __SlateRecord_pycore_ast_h_74,
+    kwarg: *mut _arg,
+    defaults: *mut __SlateRecord_pycore_ast_h_74,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _arg {
+    arg: *mut _object,
+    annotation: *mut _expr,
+    type_comment: *mut _object,
+    lineno: i32,
+    col_offset: i32,
+    end_lineno: i32,
+    end_col_offset: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _keyword {
+    arg: *mut _object,
+    value: *mut _expr,
+    lineno: i32,
+    col_offset: i32,
+    end_lineno: i32,
+    end_col_offset: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _parser_runtime_state {
+    _not_used: i32,
+    dummy_name: _expr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_time_runtime_state {
+    _unused: i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_cached_objects {
+    interned_strings: *mut _Py_hashtable_t,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_global_strings {
+    literals: __SlateRecord_pycore_global_strings_h_32,
+    identifiers: __SlateRecord_pycore_global_strings_h_58,
+    ascii: [__SlateRecord_pycore_global_strings_h_815; 128],
+    latin1: [__SlateRecord_pycore_global_strings_h_819; 128],
+}
+
+// These would be in pycore_long.h if it weren't for an include cycle.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_static_objects {
+    singletons: __SlateRecord_pycore_runtime_structs_h_115,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct pyruntimestate {
+    debug_offsets: _Py_DebugOffsets,
+    _initialized: i32,
+    preinitializing: i32,
+    preinitialized: i32,
+    core_initialized: i32,
+    initialized: i32,
+    _finalizing: *mut _ts,
+    _finalizing_id: u64,
+    interpreters: pyinterpreters,
+    main_thread: u64,
+    main_tstate: *mut _ts,
+    xi: __SlateRecord_pycore_crossinterp_h_255,
+    allocators: _pymem_allocators,
+    obmalloc: _obmalloc_global_state,
+    pyhash_state: pyhash_runtime_state,
+    threads: _pythread_runtime_state,
+    signals: _signals_runtime_state,
+    autoTSSkey: _Py_tss_t,
+    trashTSSkey: _Py_tss_t,
+    orig_argv: __SlateRecord_initconfig_h_36,
+    parser: _parser_runtime_state,
+    atexit: _atexit_runtime_state,
+    imports: _import_runtime_state,
+    ceval: _ceval_runtime_state,
+    gilstate: _gilstate_runtime_state,
+    getargs: _getargs_runtime_state,
+    fileutils: _fileutils_state,
+    faulthandler: _faulthandler_runtime_state,
+    tracemalloc: _tracemalloc_runtime_state,
+    ref_tracer: _reftracer_runtime_state,
+    stoptheworld_mutex: __SlateRecord_pycore_lock_h_189,
+    stoptheworld: _stoptheworld_state,
+    preconfig: PyPreConfig,
+    open_code_hook: Option<unsafe extern "C-unwind" fn(*mut _object, *mut ()) -> *mut _object>,
+    open_code_userdata: *mut (),
+    audit_hooks: __SlateRecord_pycore_runtime_structs_h_271,
+    object_state: _py_object_runtime_state,
+    float_state: _Py_float_runtime_state,
+    unicode_state: _Py_unicode_runtime_state,
+    types: _types_runtime_state,
+    time: _Py_time_runtime_state,
+    cached_objects: _Py_cached_objects,
+    static_objects: _Py_static_objects,
+    _main_interpreter: _is,
+}
+
+fn _Py_TryIncref(op: *mut _object) -> i32 {
+    if Py_REFCNT!(op) > 0 {
+        Py_INCREF!(op);
+        return 1;
+    }
+    0
+}
+
+// Fast inlined version of PyType_IS_GC()
+fn _PyWeakref_GET_REF(ref_obj: *mut _object) -> *mut _object {
+    let r#ref: *mut _PyWeakReference = _Py_CAST!(*mut _PyWeakReference, ref_obj);
+    let obj: *mut _object = unsafe { (*r#ref).wr_object };
+    if obj == unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) } {
+        // clear_weakref() was called
+        return core::ptr::null_mut::<_object>();
+    }
+    if _Py_TryIncref(obj) != 0 {
+        return obj;
+    }
+    core::ptr::null_mut::<_object>()
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_ext_module_loader_info {
+    filename: *mut _object,
+    filename_encoded: *mut _object,
+    name: *mut _object,
+    name_encoded: *mut _object,
+    path: *mut _object,
+    origin: u32,
+    hook_prefix: *const i8,
+    newcontext: *const i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct _Py_ext_module_loader_result {
+    def: *mut PyModuleDef,
+    module: *mut _object,
+    kind: u32,
+    err: *mut _Py_ext_module_loader_result_error,
+    _err: _Py_ext_module_loader_result_error,
+}
+
+fn PyDTrace_IMPORT_FIND_LOAD_START(arg0: *const i8) {}
+
+fn PyDTrace_IMPORT_FIND_LOAD_DONE(arg0: *const i8, arg1: i32) {}
+
+fn PyDTrace_IMPORT_FIND_LOAD_START_ENABLED() -> i32 {
+    0
+}
+
+fn PyDTrace_IMPORT_FIND_LOAD_DONE_ENABLED() -> i32 {
+    0
+}
+
+static _imp_lock_held__doc__: __SlateAlign16<[i8; 133]> = __SlateAlign16([
+    108i8, 111i8, 99i8, 107i8, 95i8, 104i8, 101i8, 108i8, 100i8, 40i8, 36i8, 109i8, 111i8, 100i8,
+    117i8, 108i8, 101i8, 44i8, 32i8, 47i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 82i8, 101i8, 116i8,
+    117i8, 114i8, 110i8, 32i8, 84i8, 114i8, 117i8, 101i8, 32i8, 105i8, 102i8, 32i8, 116i8, 104i8,
+    101i8, 32i8, 105i8, 109i8, 112i8, 111i8, 114i8, 116i8, 32i8, 108i8, 111i8, 99i8, 107i8, 32i8,
+    105i8, 115i8, 32i8, 99i8, 117i8, 114i8, 114i8, 101i8, 110i8, 116i8, 108i8, 121i8, 32i8, 104i8,
+    101i8, 108i8, 100i8, 44i8, 32i8, 101i8, 108i8, 115i8, 101i8, 32i8, 70i8, 97i8, 108i8, 115i8,
+    101i8, 46i8, 10i8, 10i8, 79i8, 110i8, 32i8, 112i8, 108i8, 97i8, 116i8, 102i8, 111i8, 114i8,
+    109i8, 115i8, 32i8, 119i8, 105i8, 116i8, 104i8, 111i8, 117i8, 116i8, 32i8, 116i8, 104i8, 114i8,
+    101i8, 97i8, 100i8, 115i8, 44i8, 32i8, 114i8, 101i8, 116i8, 117i8, 114i8, 110i8, 32i8, 70i8,
+    97i8, 108i8, 115i8, 101i8, 46i8, 0i8,
+]);
+
+use slate_support::memcpy;
+use slate_support::memset;
+use slate_support::strcmp;
+use slate_support::strlen;
+use slate_support::strrchr;
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_lock_held")]
+extern "C-unwind" fn _imp_lock_held(
+    module: *mut _object,
+    _unused_ignored: *mut _object,
+) -> *mut _object {
+    _imp_lock_held_impl(module)
+}
+
+static _imp_acquire_lock__doc__: __SlateAlign16<[i8; 241]> = __SlateAlign16([
+    97i8, 99i8, 113i8, 117i8, 105i8, 114i8, 101i8, 95i8, 108i8, 111i8, 99i8, 107i8, 40i8, 36i8,
+    109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 47i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8,
+    65i8, 99i8, 113i8, 117i8, 105i8, 114i8, 101i8, 115i8, 32i8, 116i8, 104i8, 101i8, 32i8, 105i8,
+    110i8, 116i8, 101i8, 114i8, 112i8, 114i8, 101i8, 116i8, 101i8, 114i8, 39i8, 115i8, 32i8, 105i8,
+    109i8, 112i8, 111i8, 114i8, 116i8, 32i8, 108i8, 111i8, 99i8, 107i8, 32i8, 102i8, 111i8, 114i8,
+    32i8, 116i8, 104i8, 101i8, 32i8, 99i8, 117i8, 114i8, 114i8, 101i8, 110i8, 116i8, 32i8, 116i8,
+    104i8, 114i8, 101i8, 97i8, 100i8, 46i8, 10i8, 10i8, 84i8, 104i8, 105i8, 115i8, 32i8, 108i8,
+    111i8, 99i8, 107i8, 32i8, 115i8, 104i8, 111i8, 117i8, 108i8, 100i8, 32i8, 98i8, 101i8, 32i8,
+    117i8, 115i8, 101i8, 100i8, 32i8, 98i8, 121i8, 32i8, 105i8, 109i8, 112i8, 111i8, 114i8, 116i8,
+    32i8, 104i8, 111i8, 111i8, 107i8, 115i8, 32i8, 116i8, 111i8, 32i8, 101i8, 110i8, 115i8, 117i8,
+    114i8, 101i8, 32i8, 116i8, 104i8, 114i8, 101i8, 97i8, 100i8, 45i8, 115i8, 97i8, 102i8, 101i8,
+    116i8, 121i8, 32i8, 119i8, 104i8, 101i8, 110i8, 10i8, 105i8, 109i8, 112i8, 111i8, 114i8, 116i8,
+    105i8, 110i8, 103i8, 32i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 115i8, 46i8, 32i8, 32i8,
+    79i8, 110i8, 32i8, 112i8, 108i8, 97i8, 116i8, 102i8, 111i8, 114i8, 109i8, 115i8, 32i8, 119i8,
+    105i8, 116i8, 104i8, 111i8, 117i8, 116i8, 32i8, 116i8, 104i8, 114i8, 101i8, 97i8, 100i8, 115i8,
+    44i8, 32i8, 116i8, 104i8, 105i8, 115i8, 32i8, 102i8, 117i8, 110i8, 99i8, 116i8, 105i8, 111i8,
+    110i8, 32i8, 100i8, 111i8, 101i8, 115i8, 10i8, 110i8, 111i8, 116i8, 104i8, 105i8, 110i8, 103i8,
+    46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_acquire_lock")]
+extern "C-unwind" fn _imp_acquire_lock(
+    module: *mut _object,
+    _unused_ignored: *mut _object,
+) -> *mut _object {
+    _imp_acquire_lock_impl(module)
+}
+
+static _imp_release_lock__doc__: __SlateAlign16<[i8; 127]> = __SlateAlign16([
+    114i8, 101i8, 108i8, 101i8, 97i8, 115i8, 101i8, 95i8, 108i8, 111i8, 99i8, 107i8, 40i8, 36i8,
+    109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 47i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8,
+    82i8, 101i8, 108i8, 101i8, 97i8, 115i8, 101i8, 32i8, 116i8, 104i8, 101i8, 32i8, 105i8, 110i8,
+    116i8, 101i8, 114i8, 112i8, 114i8, 101i8, 116i8, 101i8, 114i8, 39i8, 115i8, 32i8, 105i8, 109i8,
+    112i8, 111i8, 114i8, 116i8, 32i8, 108i8, 111i8, 99i8, 107i8, 46i8, 10i8, 10i8, 79i8, 110i8,
+    32i8, 112i8, 108i8, 97i8, 116i8, 102i8, 111i8, 114i8, 109i8, 115i8, 32i8, 119i8, 105i8, 116i8,
+    104i8, 111i8, 117i8, 116i8, 32i8, 116i8, 104i8, 114i8, 101i8, 97i8, 100i8, 115i8, 44i8, 32i8,
+    116i8, 104i8, 105i8, 115i8, 32i8, 102i8, 117i8, 110i8, 99i8, 116i8, 105i8, 111i8, 110i8, 32i8,
+    100i8, 111i8, 101i8, 115i8, 32i8, 110i8, 111i8, 116i8, 104i8, 105i8, 110i8, 103i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_release_lock")]
+extern "C-unwind" fn _imp_release_lock(
+    module: *mut _object,
+    _unused_ignored: *mut _object,
+) -> *mut _object {
+    _imp_release_lock_impl(module)
+}
+
+static _imp__fix_co_filename__doc__: __SlateAlign16<[i8; 170]> = __SlateAlign16([
+    95i8, 102i8, 105i8, 120i8, 95i8, 99i8, 111i8, 95i8, 102i8, 105i8, 108i8, 101i8, 110i8, 97i8,
+    109i8, 101i8, 40i8, 36i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 99i8, 111i8,
+    100i8, 101i8, 44i8, 32i8, 112i8, 97i8, 116i8, 104i8, 44i8, 32i8, 47i8, 41i8, 10i8, 45i8, 45i8,
+    10i8, 10i8, 67i8, 104i8, 97i8, 110i8, 103i8, 101i8, 115i8, 32i8, 99i8, 111i8, 100i8, 101i8,
+    46i8, 99i8, 111i8, 95i8, 102i8, 105i8, 108i8, 101i8, 110i8, 97i8, 109i8, 101i8, 32i8, 116i8,
+    111i8, 32i8, 115i8, 112i8, 101i8, 99i8, 105i8, 102i8, 121i8, 32i8, 116i8, 104i8, 101i8, 32i8,
+    112i8, 97i8, 115i8, 115i8, 101i8, 100i8, 45i8, 105i8, 110i8, 32i8, 102i8, 105i8, 108i8, 101i8,
+    32i8, 112i8, 97i8, 116i8, 104i8, 46i8, 10i8, 10i8, 32i8, 32i8, 99i8, 111i8, 100i8, 101i8, 10i8,
+    32i8, 32i8, 32i8, 32i8, 67i8, 111i8, 100i8, 101i8, 32i8, 111i8, 98i8, 106i8, 101i8, 99i8,
+    116i8, 32i8, 116i8, 111i8, 32i8, 99i8, 104i8, 97i8, 110i8, 103i8, 101i8, 46i8, 10i8, 32i8,
+    32i8, 112i8, 97i8, 116i8, 104i8, 10i8, 32i8, 32i8, 32i8, 32i8, 70i8, 105i8, 108i8, 101i8, 32i8,
+    112i8, 97i8, 116i8, 104i8, 32i8, 116i8, 111i8, 32i8, 117i8, 115i8, 101i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp__fix_co_filename")]
+extern "C-unwind" fn _imp__fix_co_filename(
+    module: *mut _object,
+    args: *const *mut _object,
+    nargs: i64,
+) -> *mut _object {
+    let mut code: *mut PyCodeObject = unsafe { core::mem::zeroed() };
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        if _PyArg_CheckPositional!(c"_fix_co_filename".as_ptr() as *mut i8, nargs, 2i32, 2i32) {
+            if PyObject_TypeCheck!(
+                unsafe { *args.wrapping_offset(0 as isize) },
+                core::ptr::addr_of_mut!(PyCode_Type)
+            ) == 0
+            {
+                _PyArg_BadArgument(
+                    c"_fix_co_filename".as_ptr(),
+                    c"argument 1".as_ptr(),
+                    (*core::ptr::addr_of_mut!(PyCode_Type)).tp_name,
+                    *args.wrapping_offset(0 as isize),
+                );
+            } else {
+                code = *args.wrapping_offset(0 as isize) as *mut PyCodeObject;
+                if PyUnicode_Check!(unsafe { *args.wrapping_offset(1 as isize) }) == 0 {
+                    _PyArg_BadArgument(
+                        c"_fix_co_filename".as_ptr(),
+                        c"argument 2".as_ptr(),
+                        c"str".as_ptr(),
+                        *args.wrapping_offset(1 as isize),
+                    );
+                } else {
+                    let path: *mut _object = *args.wrapping_offset(1 as isize);
+                    return_value = _imp__fix_co_filename_impl(module, code, path);
+                }
+            }
+        }
+        return return_value;
+    }
+}
+
+static _imp_create_builtin__doc__: __SlateAlign16<[i8; 65]> = __SlateAlign16([
+    99i8, 114i8, 101i8, 97i8, 116i8, 101i8, 95i8, 98i8, 117i8, 105i8, 108i8, 116i8, 105i8, 110i8,
+    40i8, 36i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 115i8, 112i8, 101i8, 99i8,
+    44i8, 32i8, 47i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 67i8, 114i8, 101i8, 97i8, 116i8, 101i8,
+    32i8, 97i8, 110i8, 32i8, 101i8, 120i8, 116i8, 101i8, 110i8, 115i8, 105i8, 111i8, 110i8, 32i8,
+    109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 46i8, 0i8,
+]);
+
+static _imp_extension_suffixes__doc__: __SlateAlign16<[i8; 105]> = __SlateAlign16([
+    101i8, 120i8, 116i8, 101i8, 110i8, 115i8, 105i8, 111i8, 110i8, 95i8, 115i8, 117i8, 102i8,
+    102i8, 105i8, 120i8, 101i8, 115i8, 40i8, 36i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8,
+    32i8, 47i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 82i8, 101i8, 116i8, 117i8, 114i8, 110i8, 115i8,
+    32i8, 116i8, 104i8, 101i8, 32i8, 108i8, 105i8, 115i8, 116i8, 32i8, 111i8, 102i8, 32i8, 102i8,
+    105i8, 108i8, 101i8, 32i8, 115i8, 117i8, 102i8, 102i8, 105i8, 120i8, 101i8, 115i8, 32i8, 117i8,
+    115i8, 101i8, 100i8, 32i8, 116i8, 111i8, 32i8, 105i8, 100i8, 101i8, 110i8, 116i8, 105i8, 102i8,
+    121i8, 32i8, 101i8, 120i8, 116i8, 101i8, 110i8, 115i8, 105i8, 111i8, 110i8, 32i8, 109i8, 111i8,
+    100i8, 117i8, 108i8, 101i8, 115i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_extension_suffixes")]
+extern "C-unwind" fn _imp_extension_suffixes(
+    module: *mut _object,
+    _unused_ignored: *mut _object,
+) -> *mut _object {
+    _imp_extension_suffixes_impl(module)
+}
+
+static _imp_init_frozen__doc__: __SlateAlign16<[i8; 63]> = __SlateAlign16([
+    105i8, 110i8, 105i8, 116i8, 95i8, 102i8, 114i8, 111i8, 122i8, 101i8, 110i8, 40i8, 36i8, 109i8,
+    111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 110i8, 97i8, 109i8, 101i8, 44i8, 32i8, 47i8,
+    41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 73i8, 110i8, 105i8, 116i8, 105i8, 97i8, 108i8, 105i8,
+    122i8, 101i8, 115i8, 32i8, 97i8, 32i8, 102i8, 114i8, 111i8, 122i8, 101i8, 110i8, 32i8, 109i8,
+    111i8, 100i8, 117i8, 108i8, 101i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_init_frozen")]
+extern "C-unwind" fn _imp_init_frozen(module: *mut _object, arg: *mut _object) -> *mut _object {
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        if PyUnicode_Check!(arg) == 0 {
+            _PyArg_BadArgument(
+                c"init_frozen".as_ptr(),
+                c"argument".as_ptr(),
+                c"str".as_ptr(),
+                arg,
+            );
+        } else {
+            let name: *mut _object = arg;
+            return_value = _imp_init_frozen_impl(module, name);
+        }
+        return return_value;
+    }
+}
+
+static _imp_find_frozen__doc__: __SlateAlign16<[i8; 428]> = __SlateAlign16([
+    102i8, 105i8, 110i8, 100i8, 95i8, 102i8, 114i8, 111i8, 122i8, 101i8, 110i8, 40i8, 36i8, 109i8,
+    111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 110i8, 97i8, 109i8, 101i8, 44i8, 32i8, 47i8,
+    44i8, 32i8, 42i8, 44i8, 32i8, 119i8, 105i8, 116i8, 104i8, 100i8, 97i8, 116i8, 97i8, 61i8, 70i8,
+    97i8, 108i8, 115i8, 101i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 82i8, 101i8, 116i8, 117i8,
+    114i8, 110i8, 32i8, 105i8, 110i8, 102i8, 111i8, 32i8, 97i8, 98i8, 111i8, 117i8, 116i8, 32i8,
+    116i8, 104i8, 101i8, 32i8, 99i8, 111i8, 114i8, 114i8, 101i8, 115i8, 112i8, 111i8, 110i8, 100i8,
+    105i8, 110i8, 103i8, 32i8, 102i8, 114i8, 111i8, 122i8, 101i8, 110i8, 32i8, 109i8, 111i8, 100i8,
+    117i8, 108i8, 101i8, 32i8, 40i8, 105i8, 102i8, 32i8, 116i8, 104i8, 101i8, 114i8, 101i8, 32i8,
+    105i8, 115i8, 32i8, 111i8, 110i8, 101i8, 41i8, 32i8, 111i8, 114i8, 32i8, 78i8, 111i8, 110i8,
+    101i8, 46i8, 10i8, 10i8, 84i8, 104i8, 101i8, 32i8, 114i8, 101i8, 116i8, 117i8, 114i8, 110i8,
+    101i8, 100i8, 32i8, 105i8, 110i8, 102i8, 111i8, 32i8, 40i8, 97i8, 32i8, 50i8, 45i8, 116i8,
+    117i8, 112i8, 108i8, 101i8, 41i8, 58i8, 10i8, 10i8, 32i8, 42i8, 32i8, 100i8, 97i8, 116i8, 97i8,
+    32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 116i8, 104i8, 101i8, 32i8, 114i8, 97i8,
+    119i8, 32i8, 109i8, 97i8, 114i8, 115i8, 104i8, 97i8, 108i8, 108i8, 101i8, 100i8, 32i8, 98i8,
+    121i8, 116i8, 101i8, 115i8, 10i8, 32i8, 42i8, 32i8, 105i8, 115i8, 95i8, 112i8, 97i8, 99i8,
+    107i8, 97i8, 103i8, 101i8, 32i8, 32i8, 32i8, 119i8, 104i8, 101i8, 116i8, 104i8, 101i8, 114i8,
+    32i8, 111i8, 114i8, 32i8, 110i8, 111i8, 116i8, 32i8, 105i8, 116i8, 32i8, 105i8, 115i8, 32i8,
+    97i8, 32i8, 112i8, 97i8, 99i8, 107i8, 97i8, 103i8, 101i8, 10i8, 32i8, 42i8, 32i8, 111i8, 114i8,
+    105i8, 103i8, 110i8, 97i8, 109i8, 101i8, 32i8, 32i8, 32i8, 32i8, 32i8, 116i8, 104i8, 101i8,
+    32i8, 111i8, 114i8, 105i8, 103i8, 105i8, 110i8, 97i8, 108i8, 108i8, 121i8, 32i8, 102i8, 114i8,
+    111i8, 122i8, 101i8, 110i8, 32i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 39i8, 115i8, 32i8,
+    110i8, 97i8, 109i8, 101i8, 44i8, 32i8, 111i8, 114i8, 32i8, 78i8, 111i8, 110i8, 101i8, 32i8,
+    105i8, 102i8, 32i8, 110i8, 111i8, 116i8, 10i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8,
+    32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 97i8, 32i8, 115i8, 116i8, 100i8, 108i8, 105i8,
+    98i8, 32i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 32i8, 40i8, 116i8, 104i8, 105i8, 115i8,
+    32i8, 119i8, 105i8, 108i8, 108i8, 32i8, 117i8, 115i8, 117i8, 97i8, 108i8, 108i8, 121i8, 32i8,
+    98i8, 101i8, 32i8, 116i8, 104i8, 101i8, 32i8, 115i8, 97i8, 109i8, 101i8, 32i8, 97i8, 115i8,
+    10i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8, 32i8,
+    32i8, 116i8, 104i8, 101i8, 32i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 39i8, 115i8, 32i8,
+    99i8, 117i8, 114i8, 114i8, 101i8, 110i8, 116i8, 32i8, 110i8, 97i8, 109i8, 101i8, 41i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_find_frozen")]
+extern "C-unwind" fn _imp_find_frozen(
+    module: *mut _object,
+    mut args: *const *mut _object,
+    nargs: i64,
+    kwnames: *mut _object,
+) -> *mut _object {
+    let mut withdata: i32 = unsafe { core::mem::zeroed() };
+    let mut name: *mut _object = unsafe { core::mem::zeroed() };
+    let mut __v2: i64 = unsafe { core::mem::zeroed() };
+    let mut noptargs: i64 = unsafe { core::mem::zeroed() };
+    let mut argsbuf: core::mem::MaybeUninit<__SlateAlign16<[*mut _object; 2]>> =
+        core::mem::MaybeUninit::uninit();
+    let __slate_slot_4: *mut [*mut _object; 2] =
+        core::ptr::addr_of_mut!(argsbuf) as *mut [*mut _object; 2];
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        if !kwnames.is_null() {
+            __v2 = PyTuple_GET_SIZE!(kwnames);
+        } else {
+            __v2 = 0;
+        }
+        '__join_0: {
+            noptargs = nargs.wrapping_add(__v2).wrapping_sub(1);
+            withdata = 0;
+            args = _PyArg_UnpackKeywords!(
+                args,
+                nargs,
+                core::ptr::null_mut::<()>(),
+                kwnames,
+                core::ptr::addr_of_mut!(_parser__218),
+                1i32,
+                1i32,
+                0i32,
+                0i32,
+                (*__slate_slot_4).as_mut_ptr() as *mut *mut _object
+            );
+            // minpos
+            // maxpos
+            // minkw
+            // varpos
+            if !args.is_null() {
+                if PyUnicode_Check!(unsafe { *args.wrapping_offset(0 as isize) }) == 0 {
+                    _PyArg_BadArgument(
+                        c"find_frozen".as_ptr(),
+                        c"argument 1".as_ptr(),
+                        c"str".as_ptr(),
+                        *args.wrapping_offset(0 as isize),
+                    );
+                } else {
+                    name = *args.wrapping_offset(0 as isize);
+                    if noptargs != 0 {
+                        withdata = PyObject_IsTrue(*args.wrapping_offset(1 as isize));
+                        if withdata < 0 {
+                            break '__join_0;
+                        }
+                    }
+                    return_value = _imp_find_frozen_impl(module, name, withdata);
+                }
+            }
+        }
+        return return_value;
+    }
+}
+
+static mut _kwtuple__205: __SlateRecord_import_c_h_205 = {
+    let mut __t0: __SlateRecord_import_c_h_205 = unsafe { core::mem::zeroed() };
+    __t0.ob_base = __SlateRecord_object_h_172 {
+        ob_base: _object {
+            __slate_anon_0: __SlateRecord_object_h_122 {
+                ob_refcnt_full: 1407378104778752i64,
+            },
+            ob_type: unsafe { core::ptr::addr_of_mut!(PyTuple_Type) },
+        },
+        ob_size: 1i64,
+    };
+    __t0.ob_hash = 1i32.wrapping_neg() as i64;
+    __t0.ob_item = [unsafe {
+        core::ptr::addr_of_mut!(
+            _PyRuntime
+                .static_objects
+                .singletons
+                .strings
+                .identifiers
+                ._py_withdata
+                ._ascii
+                .ob_base
+        )
+    }];
+    __t0
+};
+
+static _keywords__217: __SlateAlign16<[*const i8; 3]> = __SlateAlign16([
+    (b"\0".as_ptr() as *mut i8) as *const i8,
+    (b"withdata\0".as_ptr() as *mut i8) as *const i8,
+    core::ptr::null::<i8>(),
+]);
+
+static mut _parser__218: _PyArg_Parser = {
+    let mut __t0: _PyArg_Parser = unsafe { core::mem::zeroed() };
+    __t0.keywords = unsafe { core::ptr::addr_of!(_keywords__217.0) as *const *const i8 };
+    __t0.fname = (b"find_frozen\0".as_ptr() as *mut i8) as *const i8;
+    __t0.kwtuple = unsafe { core::ptr::addr_of_mut!(_kwtuple__205.ob_base.ob_base) };
+    __t0
+};
+
+static _imp_get_frozen_object__doc__: __SlateAlign16<[i8; 93]> = __SlateAlign16([
+    103i8, 101i8, 116i8, 95i8, 102i8, 114i8, 111i8, 122i8, 101i8, 110i8, 95i8, 111i8, 98i8, 106i8,
+    101i8, 99i8, 116i8, 40i8, 36i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 110i8,
+    97i8, 109i8, 101i8, 44i8, 32i8, 100i8, 97i8, 116i8, 97i8, 61i8, 78i8, 111i8, 110i8, 101i8,
+    44i8, 32i8, 47i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 67i8, 114i8, 101i8, 97i8, 116i8, 101i8,
+    32i8, 97i8, 32i8, 99i8, 111i8, 100i8, 101i8, 32i8, 111i8, 98i8, 106i8, 101i8, 99i8, 116i8,
+    32i8, 102i8, 111i8, 114i8, 32i8, 97i8, 32i8, 102i8, 114i8, 111i8, 122i8, 101i8, 110i8, 32i8,
+    109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_get_frozen_object")]
+extern "C-unwind" fn _imp_get_frozen_object(
+    module: *mut _object,
+    args: *const *mut _object,
+    nargs: i64,
+) -> *mut _object {
+    let mut dataobj: *mut _object = unsafe { core::mem::zeroed() };
+    let mut name: *mut _object = unsafe { core::mem::zeroed() };
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        dataobj = core::ptr::addr_of_mut!(_Py_NoneStruct);
+        if _PyArg_CheckPositional!(c"get_frozen_object".as_ptr() as *mut i8, nargs, 1i32, 2i32) {
+            if PyUnicode_Check!(unsafe { *args.wrapping_offset(0 as isize) }) == 0 {
+                _PyArg_BadArgument(
+                    c"get_frozen_object".as_ptr(),
+                    c"argument 1".as_ptr(),
+                    c"str".as_ptr(),
+                    *args.wrapping_offset(0 as isize),
+                );
+            } else {
+                name = *args.wrapping_offset(0 as isize);
+                if nargs >= 2 {
+                    dataobj = *args.wrapping_offset(1 as isize);
+                }
+                return_value = _imp_get_frozen_object_impl(module, name, dataobj);
+            }
+        }
+        return return_value;
+    }
+}
+
+static _imp_is_frozen_package__doc__: __SlateAlign16<[i8; 96]> = __SlateAlign16([
+    105i8, 115i8, 95i8, 102i8, 114i8, 111i8, 122i8, 101i8, 110i8, 95i8, 112i8, 97i8, 99i8, 107i8,
+    97i8, 103i8, 101i8, 40i8, 36i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 110i8,
+    97i8, 109i8, 101i8, 44i8, 32i8, 47i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 82i8, 101i8, 116i8,
+    117i8, 114i8, 110i8, 115i8, 32i8, 84i8, 114i8, 117i8, 101i8, 32i8, 105i8, 102i8, 32i8, 116i8,
+    104i8, 101i8, 32i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 32i8, 110i8, 97i8, 109i8, 101i8,
+    32i8, 105i8, 115i8, 32i8, 111i8, 102i8, 32i8, 97i8, 32i8, 102i8, 114i8, 111i8, 122i8, 101i8,
+    110i8, 32i8, 112i8, 97i8, 99i8, 107i8, 97i8, 103i8, 101i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_is_frozen_package")]
+extern "C-unwind" fn _imp_is_frozen_package(
+    module: *mut _object,
+    arg: *mut _object,
+) -> *mut _object {
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        if PyUnicode_Check!(arg) == 0 {
+            _PyArg_BadArgument(
+                c"is_frozen_package".as_ptr(),
+                c"argument".as_ptr(),
+                c"str".as_ptr(),
+                arg,
+            );
+        } else {
+            let name: *mut _object = arg;
+            return_value = _imp_is_frozen_package_impl(module, name);
+        }
+        return return_value;
+    }
+}
+
+static _imp_is_builtin__doc__: __SlateAlign16<[i8; 99]> = __SlateAlign16([
+    105i8, 115i8, 95i8, 98i8, 117i8, 105i8, 108i8, 116i8, 105i8, 110i8, 40i8, 36i8, 109i8, 111i8,
+    100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 110i8, 97i8, 109i8, 101i8, 44i8, 32i8, 47i8, 41i8,
+    10i8, 45i8, 45i8, 10i8, 10i8, 82i8, 101i8, 116i8, 117i8, 114i8, 110i8, 115i8, 32i8, 84i8,
+    114i8, 117i8, 101i8, 32i8, 105i8, 102i8, 32i8, 116i8, 104i8, 101i8, 32i8, 109i8, 111i8, 100i8,
+    117i8, 108i8, 101i8, 32i8, 110i8, 97i8, 109i8, 101i8, 32i8, 99i8, 111i8, 114i8, 114i8, 101i8,
+    115i8, 112i8, 111i8, 110i8, 100i8, 115i8, 32i8, 116i8, 111i8, 32i8, 97i8, 32i8, 98i8, 117i8,
+    105i8, 108i8, 116i8, 45i8, 105i8, 110i8, 32i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 46i8,
+    0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_is_builtin")]
+extern "C-unwind" fn _imp_is_builtin(module: *mut _object, arg: *mut _object) -> *mut _object {
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        if PyUnicode_Check!(arg) == 0 {
+            _PyArg_BadArgument(
+                c"is_builtin".as_ptr(),
+                c"argument".as_ptr(),
+                c"str".as_ptr(),
+                arg,
+            );
+        } else {
+            let name: *mut _object = arg;
+            return_value = _imp_is_builtin_impl(module, name);
+        }
+        return return_value;
+    }
+}
+
+static _imp_is_frozen__doc__: __SlateAlign16<[i8; 96]> = __SlateAlign16([
+    105i8, 115i8, 95i8, 102i8, 114i8, 111i8, 122i8, 101i8, 110i8, 40i8, 36i8, 109i8, 111i8, 100i8,
+    117i8, 108i8, 101i8, 44i8, 32i8, 110i8, 97i8, 109i8, 101i8, 44i8, 32i8, 47i8, 41i8, 10i8, 45i8,
+    45i8, 10i8, 10i8, 82i8, 101i8, 116i8, 117i8, 114i8, 110i8, 115i8, 32i8, 84i8, 114i8, 117i8,
+    101i8, 32i8, 105i8, 102i8, 32i8, 116i8, 104i8, 101i8, 32i8, 109i8, 111i8, 100i8, 117i8, 108i8,
+    101i8, 32i8, 110i8, 97i8, 109i8, 101i8, 32i8, 99i8, 111i8, 114i8, 114i8, 101i8, 115i8, 112i8,
+    111i8, 110i8, 100i8, 115i8, 32i8, 116i8, 111i8, 32i8, 97i8, 32i8, 102i8, 114i8, 111i8, 122i8,
+    101i8, 110i8, 32i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_is_frozen")]
+extern "C-unwind" fn _imp_is_frozen(module: *mut _object, arg: *mut _object) -> *mut _object {
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        if PyUnicode_Check!(arg) == 0 {
+            _PyArg_BadArgument(
+                c"is_frozen".as_ptr(),
+                c"argument".as_ptr(),
+                c"str".as_ptr(),
+                arg,
+            );
+        } else {
+            let name: *mut _object = arg;
+            return_value = _imp_is_frozen_impl(module, name);
+        }
+        return return_value;
+    }
+}
+
+static _imp__frozen_module_names__doc__: __SlateAlign16<[i8; 83]> = __SlateAlign16([
+    95i8, 102i8, 114i8, 111i8, 122i8, 101i8, 110i8, 95i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8,
+    95i8, 110i8, 97i8, 109i8, 101i8, 115i8, 40i8, 36i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8,
+    44i8, 32i8, 47i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 82i8, 101i8, 116i8, 117i8, 114i8, 110i8,
+    115i8, 32i8, 116i8, 104i8, 101i8, 32i8, 108i8, 105i8, 115i8, 116i8, 32i8, 111i8, 102i8, 32i8,
+    97i8, 118i8, 97i8, 105i8, 108i8, 97i8, 98i8, 108i8, 101i8, 32i8, 102i8, 114i8, 111i8, 122i8,
+    101i8, 110i8, 32i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 115i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp__frozen_module_names")]
+extern "C-unwind" fn _imp__frozen_module_names(
+    module: *mut _object,
+    _unused_ignored: *mut _object,
+) -> *mut _object {
+    _imp__frozen_module_names_impl(module)
+}
+
+static _imp__override_frozen_modules_for_tests__doc__: __SlateAlign16<[i8; 212]> =
+    __SlateAlign16([
+        95i8, 111i8, 118i8, 101i8, 114i8, 114i8, 105i8, 100i8, 101i8, 95i8, 102i8, 114i8, 111i8,
+        122i8, 101i8, 110i8, 95i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 115i8, 95i8, 102i8,
+        111i8, 114i8, 95i8, 116i8, 101i8, 115i8, 116i8, 115i8, 40i8, 36i8, 109i8, 111i8, 100i8,
+        117i8, 108i8, 101i8, 44i8, 32i8, 111i8, 118i8, 101i8, 114i8, 114i8, 105i8, 100i8, 101i8,
+        44i8, 32i8, 47i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 40i8, 105i8, 110i8, 116i8, 101i8,
+        114i8, 110i8, 97i8, 108i8, 45i8, 111i8, 110i8, 108i8, 121i8, 41i8, 32i8, 79i8, 118i8,
+        101i8, 114i8, 114i8, 105i8, 100i8, 101i8, 32i8, 80i8, 121i8, 67i8, 111i8, 110i8, 102i8,
+        105i8, 103i8, 46i8, 117i8, 115i8, 101i8, 95i8, 102i8, 114i8, 111i8, 122i8, 101i8, 110i8,
+        95i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 115i8, 46i8, 10i8, 10i8, 40i8, 45i8, 49i8,
+        58i8, 32i8, 34i8, 111i8, 102i8, 102i8, 34i8, 44i8, 32i8, 49i8, 58i8, 32i8, 34i8, 111i8,
+        110i8, 34i8, 44i8, 32i8, 48i8, 58i8, 32i8, 110i8, 111i8, 32i8, 111i8, 118i8, 101i8, 114i8,
+        114i8, 105i8, 100i8, 101i8, 41i8, 10i8, 83i8, 101i8, 101i8, 32i8, 102i8, 114i8, 111i8,
+        122i8, 101i8, 110i8, 95i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 115i8, 40i8, 41i8,
+        32i8, 105i8, 110i8, 32i8, 76i8, 105i8, 98i8, 47i8, 116i8, 101i8, 115i8, 116i8, 47i8, 115i8,
+        117i8, 112i8, 112i8, 111i8, 114i8, 116i8, 47i8, 105i8, 109i8, 112i8, 111i8, 114i8, 116i8,
+        95i8, 104i8, 101i8, 108i8, 112i8, 101i8, 114i8, 46i8, 112i8, 121i8, 46i8, 0i8,
+    ]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp__override_frozen_modules_for_tests")]
+extern "C-unwind" fn _imp__override_frozen_modules_for_tests(
+    module: *mut _object,
+    arg: *mut _object,
+) -> *mut _object {
+    let mut __v0: bool = unsafe { core::mem::zeroed() };
+    let mut r#override: i32 = unsafe { core::mem::zeroed() };
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        r#override = PyLong_AsInt(arg);
+        if r#override == 1i32.wrapping_neg() {
+            __v0 = !PyErr_Occurred().is_null();
+        } else {
+            __v0 = false;
+        }
+        if !__v0 {
+            return_value = _imp__override_frozen_modules_for_tests_impl(module, r#override);
+        }
+        return return_value;
+    }
+}
+
+static _imp__override_multi_interp_extensions_check__doc__: __SlateAlign16<[i8; 186]> =
+    __SlateAlign16([
+        95i8, 111i8, 118i8, 101i8, 114i8, 114i8, 105i8, 100i8, 101i8, 95i8, 109i8, 117i8, 108i8,
+        116i8, 105i8, 95i8, 105i8, 110i8, 116i8, 101i8, 114i8, 112i8, 95i8, 101i8, 120i8, 116i8,
+        101i8, 110i8, 115i8, 105i8, 111i8, 110i8, 115i8, 95i8, 99i8, 104i8, 101i8, 99i8, 107i8,
+        40i8, 36i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 111i8, 118i8, 101i8,
+        114i8, 114i8, 105i8, 100i8, 101i8, 44i8, 32i8, 47i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8,
+        40i8, 105i8, 110i8, 116i8, 101i8, 114i8, 110i8, 97i8, 108i8, 45i8, 111i8, 110i8, 108i8,
+        121i8, 41i8, 32i8, 79i8, 118i8, 101i8, 114i8, 114i8, 105i8, 100i8, 101i8, 32i8, 80i8,
+        121i8, 73i8, 110i8, 116i8, 101i8, 114i8, 112i8, 114i8, 101i8, 116i8, 101i8, 114i8, 67i8,
+        111i8, 110i8, 102i8, 105i8, 103i8, 46i8, 99i8, 104i8, 101i8, 99i8, 107i8, 95i8, 109i8,
+        117i8, 108i8, 116i8, 105i8, 95i8, 105i8, 110i8, 116i8, 101i8, 114i8, 112i8, 95i8, 101i8,
+        120i8, 116i8, 101i8, 110i8, 115i8, 105i8, 111i8, 110i8, 115i8, 46i8, 10i8, 10i8, 40i8,
+        45i8, 49i8, 58i8, 32i8, 34i8, 110i8, 101i8, 118i8, 101i8, 114i8, 34i8, 44i8, 32i8, 49i8,
+        58i8, 32i8, 34i8, 97i8, 108i8, 119i8, 97i8, 121i8, 115i8, 34i8, 44i8, 32i8, 48i8, 58i8,
+        32i8, 110i8, 111i8, 32i8, 111i8, 118i8, 101i8, 114i8, 114i8, 105i8, 100i8, 101i8, 41i8,
+        0i8,
+    ]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp__override_multi_interp_extensions_check")]
+extern "C-unwind" fn _imp__override_multi_interp_extensions_check(
+    module: *mut _object,
+    arg: *mut _object,
+) -> *mut _object {
+    let mut __v0: bool = unsafe { core::mem::zeroed() };
+    let mut r#override: i32 = unsafe { core::mem::zeroed() };
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        r#override = PyLong_AsInt(arg);
+        if r#override == 1i32.wrapping_neg() {
+            __v0 = !PyErr_Occurred().is_null();
+        } else {
+            __v0 = false;
+        }
+        if !__v0 {
+            return_value = _imp__override_multi_interp_extensions_check_impl(module, r#override);
+        }
+        return return_value;
+    }
+}
+
+static _imp_create_dynamic__doc__: __SlateAlign16<[i8; 89]> = __SlateAlign16([
+    99i8, 114i8, 101i8, 97i8, 116i8, 101i8, 95i8, 100i8, 121i8, 110i8, 97i8, 109i8, 105i8, 99i8,
+    40i8, 36i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 115i8, 112i8, 101i8, 99i8,
+    44i8, 32i8, 102i8, 105i8, 108i8, 101i8, 61i8, 60i8, 117i8, 110i8, 114i8, 101i8, 112i8, 114i8,
+    101i8, 115i8, 101i8, 110i8, 116i8, 97i8, 98i8, 108i8, 101i8, 62i8, 44i8, 32i8, 47i8, 41i8,
+    10i8, 45i8, 45i8, 10i8, 10i8, 67i8, 114i8, 101i8, 97i8, 116i8, 101i8, 32i8, 97i8, 110i8, 32i8,
+    101i8, 120i8, 116i8, 101i8, 110i8, 115i8, 105i8, 111i8, 110i8, 32i8, 109i8, 111i8, 100i8,
+    117i8, 108i8, 101i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_create_dynamic")]
+extern "C-unwind" fn _imp_create_dynamic(
+    module: *mut _object,
+    args: *const *mut _object,
+    nargs: i64,
+) -> *mut _object {
+    let mut file: *mut _object = unsafe { core::mem::zeroed() };
+    let mut spec: *mut _object = unsafe { core::mem::zeroed() };
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        file = core::ptr::null_mut::<_object>();
+        if _PyArg_CheckPositional!(c"create_dynamic".as_ptr() as *mut i8, nargs, 1i32, 2i32) {
+            spec = *args.wrapping_offset(0 as isize);
+            if nargs >= 2 {
+                file = *args.wrapping_offset(1 as isize);
+            }
+            return_value = _imp_create_dynamic_impl(module, spec, file);
+        }
+        return return_value;
+    }
+}
+
+static _imp_exec_dynamic__doc__: __SlateAlign16<[i8; 66]> = __SlateAlign16([
+    101i8, 120i8, 101i8, 99i8, 95i8, 100i8, 121i8, 110i8, 97i8, 109i8, 105i8, 99i8, 40i8, 36i8,
+    109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 109i8, 111i8, 100i8, 44i8, 32i8, 47i8,
+    41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 73i8, 110i8, 105i8, 116i8, 105i8, 97i8, 108i8, 105i8,
+    122i8, 101i8, 32i8, 97i8, 110i8, 32i8, 101i8, 120i8, 116i8, 101i8, 110i8, 115i8, 105i8, 111i8,
+    110i8, 32i8, 109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_exec_dynamic")]
+extern "C-unwind" fn _imp_exec_dynamic(module: *mut _object, r#mod: *mut _object) -> *mut _object {
+    let mut __v0: bool = unsafe { core::mem::zeroed() };
+    let mut _return_value: i32 = unsafe { core::mem::zeroed() };
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        _return_value = _imp_exec_dynamic_impl(module, r#mod);
+        if _return_value == 1i32.wrapping_neg() {
+            __v0 = !PyErr_Occurred().is_null();
+        } else {
+            __v0 = false;
+        }
+        if !__v0 {
+            return_value = PyLong_FromLong(_return_value as i64);
+        }
+        return return_value;
+    }
+}
+
+static _imp_exec_builtin__doc__: __SlateAlign16<[i8; 64]> = __SlateAlign16([
+    101i8, 120i8, 101i8, 99i8, 95i8, 98i8, 117i8, 105i8, 108i8, 116i8, 105i8, 110i8, 40i8, 36i8,
+    109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 109i8, 111i8, 100i8, 44i8, 32i8, 47i8,
+    41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 73i8, 110i8, 105i8, 116i8, 105i8, 97i8, 108i8, 105i8,
+    122i8, 101i8, 32i8, 97i8, 32i8, 98i8, 117i8, 105i8, 108i8, 116i8, 45i8, 105i8, 110i8, 32i8,
+    109i8, 111i8, 100i8, 117i8, 108i8, 101i8, 46i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_exec_builtin")]
+extern "C-unwind" fn _imp_exec_builtin(module: *mut _object, r#mod: *mut _object) -> *mut _object {
+    let mut __v0: bool = unsafe { core::mem::zeroed() };
+    let mut _return_value: i32 = unsafe { core::mem::zeroed() };
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        _return_value = _imp_exec_builtin_impl(module, r#mod);
+        if _return_value == 1i32.wrapping_neg() {
+            __v0 = !PyErr_Occurred().is_null();
+        } else {
+            __v0 = false;
+        }
+        if !__v0 {
+            return_value = PyLong_FromLong(_return_value as i64);
+        }
+        return return_value;
+    }
+}
+
+static _imp_source_hash__doc__: __SlateAlign16<[i8; 42]> = __SlateAlign16([
+    115i8, 111i8, 117i8, 114i8, 99i8, 101i8, 95i8, 104i8, 97i8, 115i8, 104i8, 40i8, 36i8, 109i8,
+    111i8, 100i8, 117i8, 108i8, 101i8, 44i8, 32i8, 47i8, 44i8, 32i8, 107i8, 101i8, 121i8, 44i8,
+    32i8, 115i8, 111i8, 117i8, 114i8, 99i8, 101i8, 41i8, 10i8, 45i8, 45i8, 10i8, 10i8, 0i8,
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import._imp_source_hash")]
+extern "C-unwind" fn _imp_source_hash(
+    module: *mut _object,
+    mut args: *const *mut _object,
+    nargs: i64,
+    kwnames: *mut _object,
+) -> *mut _object {
+    let mut __v0: bool = unsafe { core::mem::zeroed() };
+    let mut source: core::mem::MaybeUninit<__SlateRecord_pybuffer_h_33> =
+        core::mem::MaybeUninit::uninit();
+    let __slate_slot_1: *mut __SlateRecord_pybuffer_h_33 =
+        core::ptr::addr_of_mut!(source) as *mut __SlateRecord_pybuffer_h_33;
+    let mut key: i64 = unsafe { core::mem::zeroed() };
+    let mut argsbuf: core::mem::MaybeUninit<__SlateAlign16<[*mut _object; 2]>> =
+        core::mem::MaybeUninit::uninit();
+    let __slate_slot_3: *mut [*mut _object; 2] =
+        core::ptr::addr_of_mut!(argsbuf) as *mut [*mut _object; 2];
+    let mut return_value: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        return_value = core::ptr::null_mut::<_object>();
+        core::ptr::write(__slate_slot_1, {
+            let mut __t0: __SlateRecord_pybuffer_h_33 = core::mem::zeroed();
+            __t0.buf = core::ptr::null_mut::<()>();
+            __t0.obj = core::ptr::null_mut::<_object>();
+            __t0
+        });
+        args = _PyArg_UnpackKeywords!(
+            args,
+            nargs,
+            core::ptr::null_mut::<()>(),
+            kwnames,
+            core::ptr::addr_of_mut!(_parser__593),
+            2i32,
+            2i32,
+            0i32,
+            0i32,
+            (*__slate_slot_3).as_mut_ptr() as *mut *mut _object
+        );
+        // minpos
+        // maxpos
+        // minkw
+        // varpos
+        if !args.is_null() {
+            key = PyLong_AsLong(*args.wrapping_offset(0 as isize));
+            if key == (1i32.wrapping_neg() as i64) {
+                __v0 = !PyErr_Occurred().is_null();
+            } else {
+                __v0 = false;
+            }
+            if !__v0 {
+                if PyObject_GetBuffer(
+                    *args.wrapping_offset(1 as isize),
+                    core::ptr::addr_of_mut!(*__slate_slot_1),
+                    0i32,
+                ) == 0
+                {
+                    return_value = _imp_source_hash_impl(
+                        module,
+                        key,
+                        &(*core::ptr::addr_of_mut!(*__slate_slot_1)),
+                    );
+                }
+            }
+        }
+        if !(*__slate_slot_1).obj.is_null() {
+            PyBuffer_Release(core::ptr::addr_of_mut!(*__slate_slot_1));
+        }
+        // Cleanup for source
+        return return_value;
+    }
+}
+
+static mut _kwtuple__580: __SlateRecord_import_c_h_580 = {
+    let mut __t0: __SlateRecord_import_c_h_580 = unsafe { core::mem::zeroed() };
+    __t0.ob_base = __SlateRecord_object_h_172 {
+        ob_base: _object {
+            __slate_anon_0: __SlateRecord_object_h_122 {
+                ob_refcnt_full: 1407378104778752i64,
+            },
+            ob_type: unsafe { core::ptr::addr_of_mut!(PyTuple_Type) },
+        },
+        ob_size: 2i64,
+    };
+    __t0.ob_hash = 1i32.wrapping_neg() as i64;
+    __t0.ob_item = [
+        unsafe {
+            core::ptr::addr_of_mut!(
+                _PyRuntime
+                    .static_objects
+                    .singletons
+                    .strings
+                    .identifiers
+                    ._py_key
+                    ._ascii
+                    .ob_base
+            )
+        },
+        unsafe {
+            core::ptr::addr_of_mut!(
+                _PyRuntime
+                    .static_objects
+                    .singletons
+                    .strings
+                    .identifiers
+                    ._py_source
+                    ._ascii
+                    .ob_base
+            )
+        },
+    ];
+    __t0
+};
+
+static _keywords__592: __SlateAlign16<[*const i8; 3]> = __SlateAlign16([
+    (b"key\0".as_ptr() as *mut i8) as *const i8,
+    (b"source\0".as_ptr() as *mut i8) as *const i8,
+    core::ptr::null::<i8>(),
+]);
+
+static mut _parser__593: _PyArg_Parser = {
+    let mut __t0: _PyArg_Parser = unsafe { core::mem::zeroed() };
+    __t0.keywords = unsafe { core::ptr::addr_of!(_keywords__592.0) as *const *const i8 };
+    __t0.fname = (b"source_hash\0".as_ptr() as *mut i8) as *const i8;
+    __t0.kwtuple = unsafe { core::ptr::addr_of_mut!(_kwtuple__580.ob_base.ob_base) };
+    __t0
+};
+
+// _PySys_Audit()
+// Py_BEGIN_CRITICAL_SECTION()
+// _Py_hashtable_new_full()
+// _PyImport_BootstrapImp()
+// _PyStatus_OK()
+// struct _import_runtime_state
+// PYC_MAGIC_NUMBER_TOKEN
+// _PyModule_GetDef()
+// _PyNamespace_Type
+// _Py_SetImmortal()
+// _PyErr_SetString()
+// _Py_KeyedHash()
+// _PyMem_DefaultRawFree()
+// _PyInterpreterState_GET()
+// _PySys_ClearAttrString()
+// _PyTime_AsMicroseconds()
+// _PyUnicode_AsUTF8NoNUL()
+// _PyWeakref_GET_REF()
+// PyMarshal_ReadObjectFromString()
+// _PyImport_DynLoadFiletab
+// PyDTrace_IMPORT_FIND_LOAD_START_ENABLED()
+// bool
+// [clinic input]
+// module _imp
+// [clinic start generated code]
+//
+// [clinic end generated code: output=da39a3ee5e6b4b0d input=9c332475d8686284]
+// process-global import state
+// This table is defined in config.c:
+/// This is not used after Py_Initialize() is called.
+///
+/// (See _PyRuntimeState.imports.inittab.)
+#[unsafe(no_mangle)]
+static mut PyImport_Inittab: *mut _inittab =
+    unsafe { core::ptr::addr_of_mut!(_PyImport_Inittab) as *mut _inittab };
+
+/// When we dynamically allocate a larger table for PyImport_ExtendInittab(),
+///
+/// we track the pointer here so we can deallocate it during finalization.
+static mut inittab_copy: *mut _inittab = core::ptr::null_mut::<_inittab>();
+
+// runtime-global import state
+// interpreter import state
+// the import lock
+// Locking primitives to prevent parallel imports of the same module
+// in different threads to return with a partially loaded module.
+// These calls are serialized by the global interpreter lock.
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_AcquireLock(interp: *mut _is) {
+    unsafe { _PyRecursiveMutex_Lock(core::ptr::addr_of_mut!((*interp).imports.lock)) };
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_ReleaseLock(interp: *mut _is) {
+    unsafe { _PyRecursiveMutex_Unlock(core::ptr::addr_of_mut!((*interp).imports.lock)) };
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_ReInitLock(interp: *mut _is) {
+    // gh-126688: Thread id may change after fork() on some operating systems.
+    unsafe {
+        (*interp).imports.lock.thread = PyThread_get_thread_ident_ex();
+    }
+}
+
+// sys.modules
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_InitModules(interp: *mut _is) -> *mut _object {
+    unsafe {
+        (*interp).imports.modules = PyDict_New();
+    }
+    if MODULES!(interp).is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    MODULES!(interp)
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_GetModules(interp: *mut _is) -> *mut _object {
+    MODULES!(interp)
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_GetModulesRef(interp: *mut _is) -> *mut _object {
+    _PyImport_AcquireLock(interp);
+    let mut modules: *mut _object = MODULES!(interp);
+    if modules.is_null() {
+        // The interpreter hasn't been initialized yet.
+        modules = unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) };
+    }
+    Py_INCREF!(modules);
+    _PyImport_ReleaseLock(interp);
+    modules
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_ClearModules(interp: *mut _is) {
+    Py_SETREF__5!((*interp).imports.modules);
+}
+
+fn get_modules_dict(tstate: *mut _ts, fatal: bool) -> *mut _object {
+    // Technically, it would make sense to incref the dict,
+    // since sys.modules could be swapped out and decref'ed to 0
+    // before the caller is done using it.  However, that is highly
+    // unlikely, especially since we can rely on a global lock
+    // (i.e. the GIL) for thread-safety.
+    let modules: *mut _object = MODULES!(unsafe { (*tstate).interp });
+    if modules.is_null() {
+        if fatal {
+            Py_FatalError__46!(c"interpreter has no modules dictionary".as_ptr() as *mut i8);
+        }
+        unsafe {
+            _PyErr_SetString(
+                tstate,
+                PyExc_RuntimeError,
+                c"unable to get sys.modules".as_ptr(),
+            )
+        };
+        return core::ptr::null_mut::<_object>();
+    }
+    modules
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_GetModuleDict() -> *mut _object {
+    let tstate: *mut _ts = _PyThreadState_GET();
+    get_modules_dict(tstate, true)
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_SetModule(name: *mut _object, m: *mut _object) -> i32 {
+    let tstate: *mut _ts = _PyThreadState_GET();
+    let modules: *mut _object = get_modules_dict(tstate, true);
+    unsafe { PyObject_SetItem(modules, name, m) }
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_SetModuleString(name: *const i8, m: *mut _object) -> i32 {
+    let tstate: *mut _ts = _PyThreadState_GET();
+    let modules: *mut _object = get_modules_dict(tstate, true);
+    unsafe { PyMapping_SetItemString(modules, name, m) }
+}
+
+fn import_get_module(tstate: *mut _ts, name: *mut _object) -> *mut _object {
+    let modules: *mut _object = get_modules_dict(tstate, false);
+    if modules.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let mut m: *mut _object = unsafe { core::mem::zeroed() };
+    Py_INCREF!(modules);
+    unsafe { PyMapping_GetOptionalItem(modules, name, core::ptr::addr_of_mut!(m)) };
+    Py_DECREF!(modules);
+    m
+}
+
+fn get_importtime_name(name: *mut _object) -> *mut _object {
+    let exc: *mut _object = unsafe { PyErr_GetRaisedException() };
+    let encoded: *mut _object =
+        unsafe { PyUnicode_AsEncodedString(name, c"utf-8".as_ptr(), c"backslashreplace".as_ptr()) };
+    if encoded.is_null() {
+        unsafe { PyErr_Clear() };
+    }
+    unsafe { PyErr_SetRaisedException(exc) };
+    encoded
+}
+
+fn import_ensure_initialized(interp: *mut _is, r#mod: *mut _object, name: *mut _object) -> i32 {
+    let mut __v0: *mut i8 = unsafe { core::mem::zeroed() };
+    let mut encoded_name: *mut _object = unsafe { core::mem::zeroed() };
+    // Wait until module is done importing.
+    let mut value: *mut _object = unsafe { core::mem::zeroed() };
+    // Optimization: only call _bootstrap._lock_unlock_module() if
+    // __spec__._initializing is true.
+    // NOTE: because of this, initializing must be set *before*
+    // stuffing the new module in sys.modules.
+    let mut rc: i32 = unsafe { core::mem::zeroed() };
+    let mut spec: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        rc = PyObject_GetOptionalAttr(
+            r#mod,
+            core::ptr::addr_of_mut!(
+                _PyRuntime
+                    .static_objects
+                    .singletons
+                    .strings
+                    .identifiers
+                    ._py___spec__
+                    ._ascii
+                    .ob_base
+            ),
+            core::ptr::addr_of_mut!(spec),
+        );
+        if rc > 0 {
+            rc = _PyModuleSpec_IsInitializing(spec);
+            Py_DECREF!(spec);
+        }
+        if rc != 0 {
+            if rc < 0 {
+                return rc;
+            } else {
+                value = PyObject_CallMethodOneArg(
+                    IMPORTLIB!(interp),
+                    core::ptr::addr_of_mut!(
+                        _PyRuntime
+                            .static_objects
+                            .singletons
+                            .strings
+                            .identifiers
+                            ._py__lock_unlock_module
+                            ._ascii
+                            .ob_base
+                    ),
+                    name,
+                );
+                if value.is_null() {
+                    return 1i32.wrapping_neg();
+                } else {
+                    Py_DECREF!(value);
+                }
+            }
+        }
+        if (*_PyInterpreterState_GetConfig(interp)).import_time == 2 {
+            _IMPORT_TIME_HEADER!(interp);
+            encoded_name = get_importtime_name(name);
+            if !encoded_name.is_null() {
+                __v0 = PyBytes_AS_STRING!(encoded_name);
+            } else {
+                __v0 = c"?".as_ptr() as *mut i8;
+            }
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            slate_support::fprintf(
+                slate_support::stderr(),
+                c"import time: cached    | cached     | %*s\n".as_ptr(),
+                unsafe { (*interp).imports.find_and_load.import_level }.wrapping_mul(2),
+                __v0,
+            );
+            fflush(core::ptr::null_mut());
+            Py_XDECREF!(encoded_name);
+        }
+        // When -X importtime=2, print an import time entry even if an
+        // imported module has already been loaded.
+        return 0;
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_GetModule(name: *mut _object) -> *mut _object {
+    // Verify the module is still in sys.modules. Another thread may have
+    // removed it (due to import failure) between our import_get_module()
+    // call and the _initializing check in import_ensure_initialized().
+    let mut mod_check: *mut _object = unsafe { core::mem::zeroed() };
+    let mut r#mod: *mut _object = unsafe { core::mem::zeroed() };
+    let mut tstate: *mut _ts = unsafe { core::mem::zeroed() };
+    unsafe {
+        '__join_1: {
+            tstate = _PyThreadState_GET();
+            r#mod = import_get_module(tstate, name);
+            if !r#mod.is_null() && r#mod != core::ptr::addr_of_mut!(_Py_NoneStruct) {
+                if import_ensure_initialized((*tstate).interp, r#mod, name) >= 0 {
+                    mod_check = import_get_module(tstate, name);
+                    if mod_check != r#mod {
+                        Py_XDECREF!(mod_check);
+                        if _PyErr_Occurred(tstate).is_null() {
+                            // The module was removed or replaced. Return NULL to report
+                            // "not found" rather than trying to keep up with racing
+                            // modifications to sys.modules; returning the new value would
+                            // require looping to redo the ensure_initialized check.
+                            Py_DECREF!(r#mod);
+                            return core::ptr::null_mut::<_object>();
+                        }
+                    } else {
+                        Py_DECREF!(mod_check);
+                        break '__join_1;
+                    }
+                }
+                Py_DECREF!(r#mod);
+                remove_importlib_frames(tstate);
+                return core::ptr::null_mut::<_object>();
+            }
+        }
+        return r#mod;
+    }
+}
+
+// Get the module object corresponding to a module name.
+// First check the modules dictionary if there's one there,
+// if not, create a new one and insert it in the modules dictionary.
+fn import_add_module_lock_held(modules: *mut _object, name: *mut _object) -> *mut _object {
+    let mut m: *mut _object = unsafe { core::mem::zeroed() };
+    if (unsafe { PyMapping_GetOptionalItem(modules, name, core::ptr::addr_of_mut!(m)) }) < 0 {
+        return core::ptr::null_mut::<_object>();
+    }
+    let __v0: bool = !m.is_null() && PyModule_Check!(m) != 0;
+    if __v0 {
+        return m;
+    }
+    Py_XDECREF!(m);
+    m = unsafe { PyModule_NewObject(name) };
+    if m.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    if (unsafe { PyObject_SetItem(modules, name, m) }) != 0 {
+        Py_DECREF!(m);
+        return core::ptr::null_mut::<_object>();
+    }
+    m
+}
+
+fn import_add_module(tstate: *mut _ts, name: *mut _object) -> *mut _object {
+    let modules: *mut _object = get_modules_dict(tstate, false);
+    if modules.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let m: *mut _object = import_add_module_lock_held(modules, name);
+    m
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_AddModuleRef(name: *const i8) -> *mut _object {
+    let name_obj: *mut _object = unsafe { PyUnicode_FromString(name) };
+    if name_obj.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let tstate: *mut _ts = _PyThreadState_GET();
+    let module: *mut _object = import_add_module(tstate, name_obj);
+    Py_DECREF!(name_obj);
+    module
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_AddModuleObject(name: *mut _object) -> *mut _object {
+    let tstate: *mut _ts = _PyThreadState_GET();
+    let mut r#mod: *mut _object = import_add_module(tstate, name);
+    if r#mod.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    // gh-86160: PyImport_AddModuleObject() returns a borrowed reference.
+    //
+    // Create a weak reference to produce a borrowed reference, since it can
+    //
+    // become NULL. sys.modules type can be different than dict and it is not
+    //
+    // guaranteed that it keeps a strong reference to the module. It can be a
+    //
+    // custom mapping with __getitem__() which returns a new object or removes
+    //
+    // returned object, or __setitem__ which does nothing. There is so much
+    //
+    // unknown.  With weakref we can be sure that we get either a reference to
+    //
+    // live object or NULL.
+    //
+    //
+    //
+    // Use PyImport_AddModuleRef() to avoid these issues.
+    let r#ref: *mut _object = unsafe { PyWeakref_NewRef(r#mod, core::ptr::null_mut::<_object>()) };
+    Py_DECREF!(r#mod);
+    if r#ref.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    r#mod = _PyWeakref_GET_REF(r#ref);
+    Py_DECREF!(r#ref);
+    Py_XDECREF!(r#mod);
+    let __v0: bool = r#mod.is_null() && unsafe { PyErr_Occurred() }.is_null();
+    if __v0 {
+        unsafe {
+            PyErr_SetString(
+                PyExc_RuntimeError,
+                c"sys.modules does not hold a strong reference to the module".as_ptr(),
+            )
+        };
+    }
+    return r#mod; // borrowed reference
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_AddModule(name: *const i8) -> *mut _object {
+    let nameobj: *mut _object = unsafe { PyUnicode_FromString(name) };
+    if nameobj.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let module: *mut _object = PyImport_AddModuleObject(nameobj);
+    Py_DECREF!(nameobj);
+    module
+}
+
+/// Remove name from sys.modules, if it's there.
+/// Can be called with an exception raised.
+/// If fail to remove name a new exception will be chained with the old
+/// exception, otherwise the old exception is preserved.
+fn remove_module(tstate: *mut _ts, name: *mut _object) {
+    let exc: *mut _object = unsafe { _PyErr_GetRaisedException(tstate) };
+    let modules: *mut _object = get_modules_dict(tstate, true);
+    if PyDict_CheckExact!(modules) != 0 {
+        // Error is reported to the caller
+        unsafe { PyDict_Pop(modules, name, core::ptr::null_mut::<*mut _object>()) };
+    } else {
+        if PyMapping_DelItem!(modules, name) < 0 {
+            if (unsafe { _PyErr_ExceptionMatches(tstate, PyExc_KeyError) }) != 0 {
+                unsafe { _PyErr_Clear(tstate) };
+            }
+        }
+    }
+    unsafe { _PyErr_ChainExceptions1(exc) };
+}
+
+// per-interpreter modules-by-index
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_GetNextModuleIndex() -> i64 {
+    _Py_atomic_add_ssize(
+        unsafe { core::ptr::addr_of_mut!(_PyRuntime.imports.last_module_index) },
+        1i64,
+    )
+    .wrapping_add(1)
+}
+
+fn _get_module_index_from_def(def: *mut PyModuleDef) -> i64 {
+    let index: i64 = unsafe { (*def).m_base.m_index };
+    index
+}
+
+fn _set_module_index(def: *mut PyModuleDef, index: i64) {
+    if index == unsafe { (*def).m_base.m_index } {
+        // There's nothing to do.
+    } else {
+        if (unsafe { (*def).m_base.m_index }) == 0 {
+            // It should have been initialized by PyModuleDef_Init().
+            // We assert here to catch this in dev, but keep going otherwise.
+            unsafe {
+                (*def).m_base.m_index = index;
+            }
+        } else {
+            // It was already set for a different module.
+            // We replace the old value.
+            unsafe {
+                (*def).m_base.m_index = index;
+            }
+        }
+    }
+}
+
+fn _modules_by_index_check(interp: *mut _is, index: i64) -> *const i8 {
+    if index <= 0 {
+        return c"invalid module index".as_ptr();
+    }
+    if MODULES_BY_INDEX!(interp).is_null() {
+        return c"Interpreters module-list not accessible.".as_ptr();
+    }
+    if index >= PyList_GET_SIZE!(MODULES_BY_INDEX!(interp)) {
+        return c"Module index out of bounds.".as_ptr();
+    }
+    core::ptr::null::<i8>()
+}
+
+fn _modules_by_index_get(interp: *mut _is, index: i64) -> *mut _object {
+    if !_modules_by_index_check(interp, index).is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let res: *mut _object = PyList_GET_ITEM!(MODULES_BY_INDEX!(interp), index);
+    if res == unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) } {
+        core::ptr::null_mut::<_object>()
+    } else {
+        res
+    }
+}
+
+fn _modules_by_index_set(interp: *mut _is, index: i64, module: *mut _object) -> i32 {
+    if MODULES_BY_INDEX!(interp).is_null() {
+        unsafe {
+            (*interp).imports.modules_by_index = PyList_New(0i64);
+        }
+        if MODULES_BY_INDEX!(interp).is_null() {
+            return 1i32.wrapping_neg();
+        }
+    }
+    while PyList_GET_SIZE!(MODULES_BY_INDEX!(interp)) <= index {
+        if (unsafe {
+            PyList_Append(
+                MODULES_BY_INDEX!(interp),
+                core::ptr::addr_of_mut!(_Py_NoneStruct),
+            )
+        }) < 0
+        {
+            return 1i32.wrapping_neg();
+        }
+    }
+    unsafe { PyList_SetItem(MODULES_BY_INDEX!(interp), index, Py_NewRef!(module)) }
+}
+
+fn _modules_by_index_clear_one(interp: *mut _is, index: i64) -> i32 {
+    let err: *const i8 = _modules_by_index_check(interp, index);
+    if !err.is_null() {
+        Py_FatalError__22!(err);
+        return 1i32.wrapping_neg();
+    }
+    unsafe {
+        PyList_SetItem(
+            MODULES_BY_INDEX!(interp),
+            index,
+            Py_NewRef!(core::ptr::addr_of_mut!(_Py_NoneStruct)),
+        )
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyState_FindModule(module: *mut PyModuleDef) -> *mut _object {
+    let interp: *mut _is = _PyInterpreterState_GET();
+    if !unsafe { (*module).m_slots }.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let index: i64 = _get_module_index_from_def(module);
+    _modules_by_index_get(interp, index)
+}
+
+/// _PyState_AddModule() has been completely removed from the C-API
+/// (and was removed from the limited API in 3.6).  However, we're
+/// playing it safe and keeping it around for any stable ABI extensions
+/// built against 3.2-3.5.
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyState_AddModule(
+    tstate: *mut _ts,
+    module: *mut _object,
+    def: *mut PyModuleDef,
+) -> i32 {
+    if def.is_null() {
+        return 1i32.wrapping_neg();
+    }
+    if !unsafe { (*def).m_slots }.is_null() {
+        unsafe {
+            _PyErr_SetString(
+                tstate,
+                PyExc_SystemError,
+                c"PyState_AddModule called on module with slots".as_ptr(),
+            )
+        };
+        return 1i32.wrapping_neg();
+    }
+    let index: i64 = _get_module_index_from_def(def);
+    _modules_by_index_set(unsafe { (*tstate).interp }, index, module)
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyState_AddModule(module: *mut _object, def: *mut PyModuleDef) -> i32 {
+    if def.is_null() {
+        Py_FatalError__36!(c"module definition is NULL".as_ptr() as *mut i8);
+        return 1i32.wrapping_neg();
+    }
+    let tstate: *mut _ts = _PyThreadState_GET();
+    if !unsafe { (*def).m_slots }.is_null() {
+        unsafe {
+            _PyErr_SetString(
+                tstate,
+                PyExc_SystemError,
+                c"PyState_AddModule called on module with slots".as_ptr(),
+            )
+        };
+        return 1i32.wrapping_neg();
+    }
+    let interp: *mut _is = unsafe { (*tstate).interp };
+    let index: i64 = _get_module_index_from_def(def);
+    let __v0: bool =
+        !MODULES_BY_INDEX!(interp).is_null() && index < PyList_GET_SIZE!(MODULES_BY_INDEX!(interp));
+    let __v1: bool = __v0 && module == PyList_GET_ITEM!(MODULES_BY_INDEX!(interp), index);
+    if __v1 {
+        unsafe {
+            _Py_FatalErrorFormat(
+                c"PyState_AddModule".as_ptr(),
+                c"module %p already added".as_ptr(),
+                module,
+            )
+        };
+        unsafe { core::hint::unreachable_unchecked() };
+        return 1i32.wrapping_neg();
+    }
+    _modules_by_index_set(interp, index, module)
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyState_RemoveModule(def: *mut PyModuleDef) -> i32 {
+    let tstate: *mut _ts = _PyThreadState_GET();
+    if !unsafe { (*def).m_slots }.is_null() {
+        unsafe {
+            _PyErr_SetString(
+                tstate,
+                PyExc_SystemError,
+                c"PyState_RemoveModule called on module with slots".as_ptr(),
+            )
+        };
+        return 1i32.wrapping_neg();
+    }
+    let index: i64 = _get_module_index_from_def(def);
+    _modules_by_index_clear_one(unsafe { (*tstate).interp }, index)
+}
+
+/// Used by finalize_modules()
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_ClearModulesByIndex(interp: *mut _is) {
+    if MODULES_BY_INDEX!(interp).is_null() {
+        return;
+    }
+    let mut i: i64 = 0;
+    while i < PyList_GET_SIZE!(MODULES_BY_INDEX!(interp)) {
+        let m: *mut _object = PyList_GET_ITEM!(MODULES_BY_INDEX!(interp), i);
+        if PyModule_Check!(m) != 0 {
+            // cleanup the saved copy of module dicts
+            let md: *mut PyModuleDef = unsafe { PyModule_GetDef(m) };
+            if !md.is_null() {
+                // XXX Do this more carefully.  The dict might be owned
+                //
+                // by another interpreter.
+                Py_CLEAR!((*md).m_base.m_copy);
+            }
+        }
+        i = i.wrapping_add(1);
+    }
+    // Setting modules_by_index to NULL could be dangerous, so we
+    // clear the list instead.
+    if (unsafe {
+        PyList_SetSlice(
+            MODULES_BY_INDEX!(interp),
+            0i64,
+            PyList_GET_SIZE!(MODULES_BY_INDEX!(interp)),
+            core::ptr::null_mut::<_object>(),
+        )
+    }) != 0
+    {
+        unsafe {
+            PyErr_FormatUnraisable(
+                c"Exception ignored while clearing interpreters module list".as_ptr(),
+            )
+        };
+    }
+}
+
+// extension modules
+// It may help to have a big picture view of what happens
+// when an extension is loaded.  This includes when it is imported
+// for the first time.
+//
+// Here's a summary, using importlib._bootstrap._load() as a starting point.
+//
+// 1.  importlib._bootstrap._load()
+// 2.    _load():  acquire import lock
+// 3.    _load() -> importlib._bootstrap._load_unlocked()
+// 4.      _load_unlocked() -> importlib._bootstrap.module_from_spec()
+// 5.        module_from_spec() -> ExtensionFileLoader.create_module()
+// 6.          create_module() -> _imp.create_dynamic()
+//                 (see below)
+// 7.        module_from_spec() -> importlib._bootstrap._init_module_attrs()
+// 8.      _load_unlocked():  sys.modules[name] = module
+// 9.      _load_unlocked() -> ExtensionFileLoader.exec_module()
+// 10.       exec_module() -> _imp.exec_dynamic()
+//               (see below)
+// 11.   _load():  release import lock
+//
+//
+// ...for single-phase init modules, where m_size == -1:
+//
+// (6). first time  (not found in _PyRuntime.imports.extensions):
+//    A. _imp_create_dynamic_impl() -> import_find_extension()
+//    B. _imp_create_dynamic_impl() -> _PyImport_GetModInitFunc()
+//    C.   _PyImport_GetModInitFunc():  load <module init func>
+//    D. _imp_create_dynamic_impl() -> import_run_extension()
+//    E.   import_run_extension() -> _PyImport_RunModInitFunc()
+//    F.     _PyImport_RunModInitFunc():  call <module init func>
+//    G.       <module init func> -> PyModule_Create() -> PyModule_Create2()
+//                                       -> PyModule_CreateInitialized()
+//    H.         PyModule_CreateInitialized() -> PyModule_New()
+//    I.         PyModule_CreateInitialized():  allocate mod->md_state
+//    J.         PyModule_CreateInitialized() -> PyModule_AddFunctions()
+//    K.         PyModule_CreateInitialized() -> PyModule_SetDocString()
+//    L.       PyModule_CreateInitialized():  set mod->md_def
+//    M.       <module init func>:  initialize the module, etc.
+//    N.   import_run_extension()
+//             -> _PyImport_CheckSubinterpIncompatibleExtensionAllowed()
+//    O.   import_run_extension():  set __file__
+//    P.   import_run_extension() -> update_global_state_for_extension()
+//    Q.     update_global_state_for_extension():
+//                   copy __dict__ into def->m_base.m_copy
+//    R.     update_global_state_for_extension():
+//                   add it to _PyRuntime.imports.extensions
+//    S.   import_run_extension() -> finish_singlephase_extension()
+//    T.     finish_singlephase_extension():
+//                   add it to interp->imports.modules_by_index
+//    U.     finish_singlephase_extension():  add it to sys.modules
+//
+//    Step (Q) is skipped for core modules (sys/builtins).
+//
+// (6). subsequent times  (found in _PyRuntime.imports.extensions):
+//    A. _imp_create_dynamic_impl() -> import_find_extension()
+//    B.   import_find_extension() -> reload_singlephase_extension()
+//    C.     reload_singlephase_extension()
+//               -> _PyImport_CheckSubinterpIncompatibleExtensionAllowed()
+//    D.     reload_singlephase_extension() -> import_add_module()
+//    E.       if name in sys.modules:  use that module
+//    F.       else:
+//               1. import_add_module() -> PyModule_NewObject()
+//               2. import_add_module():  set it on sys.modules
+//    G.     reload_singlephase_extension():  copy the "m_copy" dict into __dict__
+//    H.     reload_singlephase_extension():  add to modules_by_index
+//
+// (10). (every time):
+//    A. noop
+//
+//
+// ...for single-phase init modules, where m_size >= 0:
+//
+// (6). not main interpreter and never loaded there - every time  (not found in _PyRuntime.imports.extensions):
+//    A-P. (same as for m_size == -1)
+//    Q.     _PyImport_RunModInitFunc():  set def->m_base.m_init
+//    R. (skipped)
+//    S-U. (same as for m_size == -1)
+//
+// (6). main interpreter - first time  (not found in _PyRuntime.imports.extensions):
+//    A-P. (same as for m_size == -1)
+//    Q.     _PyImport_RunModInitFunc():  set def->m_base.m_init
+//    R-U. (same as for m_size == -1)
+//
+// (6). subsequent times  (found in _PyRuntime.imports.extensions):
+//    A. _imp_create_dynamic_impl() -> import_find_extension()
+//    B.   import_find_extension() -> reload_singlephase_extension()
+//    C.     reload_singlephase_extension()
+//               -> _PyImport_CheckSubinterpIncompatibleExtensionAllowed()
+//    D.     reload_singlephase_extension():  call def->m_base.m_init  (see above)
+//    E.     reload_singlephase_extension():  add the module to sys.modules
+//    F.     reload_singlephase_extension():  add to modules_by_index
+//
+// (10). every time:
+//    A. noop
+//
+//
+// ...for multi-phase init modules:
+//
+// (6). every time:
+//    A. _imp_create_dynamic_impl() -> import_find_extension()  (not found)
+//    B. _imp_create_dynamic_impl() -> _PyImport_GetModInitFunc()
+//    C.   _PyImport_GetModInitFunc():  load <module init func>
+//    D. _imp_create_dynamic_impl() -> import_run_extension()
+//    E.   import_run_extension() -> _PyImport_RunModInitFunc()
+//    F.     _PyImport_RunModInitFunc():  call <module init func>
+//    G.   import_run_extension() -> PyModule_FromDefAndSpec()
+//    H.      PyModule_FromDefAndSpec(): gather/check moduledef slots
+//    I.      if there's a Py_mod_create slot:
+//              1. PyModule_FromDefAndSpec():  call its function
+//    J.      else:
+//              1. PyModule_FromDefAndSpec() -> PyModule_NewObject()
+//    K:      PyModule_FromDefAndSpec():  set mod->md_def
+//    L.      PyModule_FromDefAndSpec() -> _add_methods_to_object()
+//    M.      PyModule_FromDefAndSpec() -> PyModule_SetDocString()
+//
+// (10). every time:
+//    A. _imp_exec_dynamic_impl() -> exec_builtin_or_dynamic()
+//    B.   if mod->md_state == NULL (including if m_size == 0):
+//         1. exec_builtin_or_dynamic() -> PyModule_ExecDef()
+//         2.   PyModule_ExecDef():  allocate mod->md_state
+//         3.   if there's a Py_mod_exec slot:
+//              1. PyModule_ExecDef():  call its function
+// Make sure name is fully qualified.
+//
+// This is a bit of a hack: when the shared library is loaded,
+// the module name is "package.module", but the module calls
+// PyModule_Create*() with just "module" for the name.  The shared
+// library loader squirrels away the true name of the module in
+// _PyRuntime.imports.pkgcontext, and PyModule_Create*() will
+// substitute this (if the name actually matches).
+#[thread_local]
+#[unsafe(no_mangle)]
+static mut pkgcontext: *const i8 = core::ptr::null::<i8>();
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_ResolveNameWithPackageContext(mut name: *const i8) -> *const i8 {
+    if !unsafe { pkgcontext }.is_null() {
+        let p: *const i8 =
+            (unsafe { strrchr(pkgcontext as *const core::ffi::c_char, 46i32 as i32) as *mut i8 })
+                as *const i8;
+        if !p.is_null()
+            && (unsafe {
+                strcmp(
+                    name as *const core::ffi::c_char,
+                    p.wrapping_offset(1 as isize) as *const core::ffi::c_char,
+                ) as i32
+            }) == 0
+        {
+            name = unsafe { pkgcontext };
+            unsafe {
+                pkgcontext = core::ptr::null::<i8>();
+            }
+        }
+    }
+    name
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_SwapPackageContext(newcontext: *const i8) -> *const i8 {
+    let oldcontext: *const i8 = unsafe { pkgcontext };
+    unsafe {
+        pkgcontext = newcontext;
+    }
+    oldcontext
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_GetDLOpenFlags(interp: *mut _is) -> i32 {
+    DLOPENFLAGS!(interp)
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_SetDLOpenFlags(interp: *mut _is, new_val: i32) {
+    FT_ATOMIC_STORE_INT_RELAXED!((*interp).imports.dlopenflags, new_val);
+}
+
+/// Common implementation for _imp.exec_dynamic and _imp.exec_builtin
+fn exec_builtin_or_dynamic(r#mod: *mut _object) -> i32 {
+    if PyModule_Check!(r#mod) == 0 {
+        return 0;
+    }
+    let def: *mut PyModuleDef = unsafe { PyModule_GetDef(r#mod) };
+    if def.is_null() {
+        return 0;
+    }
+    let state: *mut () = unsafe { PyModule_GetState(r#mod) };
+    if !state.is_null() {
+        // Already initialized; skip reload
+        return 0;
+    }
+    unsafe { PyModule_ExecDef(r#mod, def) }
+}
+
+/// Currently, this is only used for testing.
+///
+/// (See _testinternalcapi.clear_extension().)
+///
+/// If adding another use, be careful about modules that import themselves
+///
+/// recursively (see gh-123880).
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_ClearExtension(name: *mut _object, filename: *mut _object) -> i32 {
+    let interp: *mut _is = _PyInterpreterState_GET();
+    // Clearing a module's C globals is up to the module.
+    if clear_singlephase_extension(interp, name, filename) < 0 {
+        return 1i32.wrapping_neg();
+    }
+    // In the future we'll probably also make sure the extension's
+    //
+    // file handle (and DL handle) is closed (requires saving it).
+    0
+}
+
+// single-phase init modules
+// We support a number of kinds of single-phase init builtin/extension modules:
+//
+// * "basic"
+//     * no module state (PyModuleDef.m_size == -1)
+//     * does not support repeated init (we use PyModuleDef.m_base.m_copy)
+//     * may have process-global state
+//     * the module's def is cached in _PyRuntime.imports.extensions,
+//       by (name, filename)
+// * "reinit"
+//     * no module state (PyModuleDef.m_size == 0)
+//     * supports repeated init (m_copy is never used)
+//     * should not have any process-global state
+//     * its def is never cached in _PyRuntime.imports.extensions
+//       (except, currently, under the main interpreter, for some reason)
+// * "with state"  (almost the same as reinit)
+//     * has module state (PyModuleDef.m_size > 0)
+//     * supports repeated init (m_copy is never used)
+//     * should not have any process-global state
+//     * its def is never cached in _PyRuntime.imports.extensions
+//       (except, currently, under the main interpreter, for some reason)
+//
+// There are also variants within those classes:
+//
+// * two or more modules share a PyModuleDef
+//     * a module's init func uses another module's PyModuleDef
+//     * a module's init func calls another's module's init func
+//     * a module's init "func" is actually a variable statically initialized
+//       to another module's init func
+// * two or modules share "methods"
+//     * a module's init func copies another module's PyModuleDef
+//       (with a different name)
+// * (basic-only) two or modules share process-global state
+//
+// In the first case, where modules share a PyModuleDef, the following
+// notable weirdness happens:
+//
+// * the module's __name__ matches the def, not the requested name
+// * the last module (with the same def) to be imported for the first time wins
+//     * returned by PyState_Find_Module() (via interp->modules_by_index)
+//     * (non-basic-only) its init func is used when re-loading any of them
+//       (via the def's m_init)
+//     * (basic-only) the copy of its __dict__ is used when re-loading any of them
+//       (via the def's m_copy)
+//
+// However, the following happens as expected:
+//
+// * a new module object (with its own __dict__) is created for each request
+// * the module's __spec__ has the requested name
+// * the loaded module is cached in sys.modules under the requested name
+// * the m_index field of the shared def is not changed,
+//   so at least PyState_FindModule() will always look in the same place
+//
+// For "basic" modules there are other quirks:
+//
+// * (whether sharing a def or not) when loaded the first time,
+//   m_copy is set before _init_module_attrs() is called
+//   in importlib._bootstrap.module_from_spec(),
+//   so when the module is re-loaded, the previous value
+//   for __wpec__ (and others) is reset, possibly unexpectedly.
+//
+// Generally, when multiple interpreters are involved, some of the above
+// gets even messier.
+fn extensions_lock_acquire() {
+    _PyMutex_Lock(unsafe { core::ptr::addr_of_mut!(_PyRuntime.imports.extensions.mutex) });
+}
+
+fn extensions_lock_release() {
+    _PyMutex_Unlock(unsafe { core::ptr::addr_of_mut!(_PyRuntime.imports.extensions.mutex) });
+}
+
+// Magic for extension modules (built-in as well as dynamically
+// loaded).  To prevent initializing an extension module more than
+// once, we keep a static dictionary 'extensions' keyed by the tuple
+// (module name, module name)  (for built-in modules) or by
+// (filename, module name) (for dynamically loaded modules), containing these
+// modules.  A copy of the module's dictionary is stored by calling
+// fix_up_extension() immediately after the module initialization
+// function succeeds.  A copy can be retrieved from there by calling
+// import_find_extension().
+//
+// Modules which do support multiple initialization set their m_size
+// field to a non-negative number (indicating the size of the
+// module-specific state). They are still recorded in the extensions
+// dictionary, to avoid loading shared libraries twice.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct cached_m_dict {
+    /// A shallow copy of the original module's __dict__.
+    copied: *mut _object,
+    /// The interpreter that owns the copy.
+    interpid: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct extensions_cache_value {
+    def: *mut PyModuleDef,
+    /// The function used to re-initialize the module.
+    /// This is only set for legacy (single-phase init) extension modules
+    /// and only used for those that support multiple initializations
+    /// (m_size >= 0).
+    /// It is set by update_global_state_for_extension().
+    m_init: Option<unsafe extern "C-unwind" fn() -> *mut _object>,
+    /// The module's index into its interpreter's modules_by_index cache.
+    /// This is set for all extension modules but only used for legacy ones.
+    /// (See PyInterpreterState.modules_by_index for more info.)
+    m_index: i64,
+    /// A copy of the module's __dict__ after the first time it was loaded.
+    /// This is only set/used for legacy modules that do not support
+    /// multiple initializations.
+    /// It is set exclusively by fixup_cached_def().
+    m_dict: *mut cached_m_dict,
+    _m_dict: cached_m_dict,
+    origin: u32,
+}
+
+fn alloc_extensions_cache_value() -> *mut extensions_cache_value {
+    let mut __slate_compound_0: extensions_cache_value = unsafe { core::mem::zeroed() };
+    let value: *mut extensions_cache_value =
+        (unsafe { PyMem_RawMalloc(core::mem::size_of::<extensions_cache_value>() as u64) })
+            as *mut extensions_cache_value;
+    if value.is_null() {
+        unsafe { PyErr_NoMemory() };
+        return core::ptr::null_mut::<extensions_cache_value>();
+    }
+    unsafe {
+        *value = *{
+            __slate_compound_0 = {
+                let mut __t0: extensions_cache_value = core::mem::zeroed();
+                __t0.def = core::ptr::null_mut::<PyModuleDef>();
+                __t0
+            };
+            core::ptr::addr_of_mut!(__slate_compound_0)
+        };
+    }
+    value
+}
+
+fn free_extensions_cache_value(value: *mut extensions_cache_value) {
+    unsafe { PyMem_RawFree(value as *mut ()) };
+}
+
+fn _get_cached_module_index(cached: *mut extensions_cache_value) -> i64 {
+    unsafe { (*cached).m_index }
+}
+
+fn fixup_cached_def(value: *mut extensions_cache_value) {
+    // For the moment, the values in the def's m_base may belong
+    // to another module, and we're replacing them here.  This can
+    // cause problems later if the old module is reloaded.
+    //
+    // Also, we don't decref any old cached values first when we
+    // replace them here, in case we need to restore them in the
+    // near future.  Instead, the caller is responsible for wrapping
+    // this up by calling cleanup_old_cached_def() or
+    // restore_old_cached_def() if there was an error.
+    let def: *mut PyModuleDef = unsafe { (*value).def };
+    // We assume that all module defs are statically allocated
+    // and will never be freed.  Otherwise, we would incref here.
+    unsafe { _Py_SetImmortalUntracked(def as *mut _object) };
+    unsafe {
+        (*def).m_base.m_init = (*value).m_init;
+    }
+    _set_module_index(def, unsafe { (*value).m_index });
+    // Different modules can share the same def, so we can't just
+    // expect m_copy to be NULL.
+    if !unsafe { (*value).m_dict }.is_null() {
+        // As noted above, we don't first decref the old value, if any.
+        unsafe {
+            (*def).m_base.m_copy = Py_NewRef!(unsafe { (*(*value).m_dict).copied });
+        }
+    }
+}
+
+fn restore_old_cached_def(def: *mut PyModuleDef, oldbase: &PyModuleDef_Base) {
+    unsafe {
+        (*def).m_base = *(oldbase as *const PyModuleDef_Base);
+    }
+}
+
+fn cleanup_old_cached_def(oldbase: *mut PyModuleDef_Base) {
+    Py_XDECREF!(unsafe { (*oldbase).m_copy });
+}
+
+fn del_cached_def(value: *mut extensions_cache_value) {
+    // If we hadn't made the stored defs immortal, we would decref here.
+    // However, this decref would be problematic if the module def were
+    // dynamically allocated, it were the last ref, and this function
+    // were called with an interpreter other than the def's owner.
+    Py_XDECREF!(unsafe { (*(*value).def).m_base.m_copy });
+    unsafe {
+        (*(*value).def).m_base.m_copy = core::ptr::null_mut::<_object>();
+    }
+}
+
+fn init_cached_m_dict(value: *mut extensions_cache_value, m_dict: *mut _object) -> i32 {
+    let mut __slate_compound_0: cached_m_dict = unsafe { core::mem::zeroed() };
+    // This should only have been called without an m_dict already set.
+    if m_dict.is_null() {
+        return 0;
+    }
+    let interp: *mut _is = _PyInterpreterState_GET();
+    // XXX gh-88216: The copied dict is owned by the current
+    // interpreter.  That's a problem if the interpreter has
+    // its own obmalloc state or if the module is successfully
+    // imported into such an interpreter.  If the interpreter
+    // has its own GIL then there may be data races and
+    // PyImport_ClearModulesByIndex() can crash.  Normally,
+    // a single-phase init module cannot be imported in an
+    // isolated interpreter, but there are ways around that.
+    // Hence, heere be dragons!  Ideally we would instead do
+    // something like make a read-only, immortal copy of the
+    // dict using PyMem_RawMalloc() and store *that* in m_copy.
+    // Then we'd need to make sure to clear that when the
+    // runtime is finalized, rather than in
+    // PyImport_ClearModulesByIndex().
+    let copied: *mut _object = unsafe { PyDict_Copy(m_dict) };
+    if copied.is_null() {
+        // We expect this can only be "out of memory".
+        return 1i32.wrapping_neg();
+    }
+    // XXX We may want to make the copy immortal.
+    unsafe {
+        (*value)._m_dict = *{
+            __slate_compound_0 = cached_m_dict {
+                copied: copied,
+                interpid: PyInterpreterState_GetID(interp),
+            };
+            core::ptr::addr_of_mut!(__slate_compound_0)
+        };
+    }
+    unsafe {
+        (*value).m_dict = core::ptr::addr_of_mut!((*value)._m_dict);
+    }
+    0
+}
+
+fn del_cached_m_dict(value: *mut extensions_cache_value) {
+    if !unsafe { (*value).m_dict }.is_null() {
+        // In the future we can take advantage of m_dict->interpid
+        // to decref the dict using the owning interpreter.
+        Py_XDECREF!(unsafe { (*(*value).m_dict).copied });
+        unsafe {
+            (*value).m_dict = core::ptr::null_mut::<cached_m_dict>();
+        }
+    }
+}
+
+fn get_cached_m_dict(
+    value: *mut extensions_cache_value,
+    name: *mut _object,
+    path: *mut _object,
+) -> *mut _object {
+    let interp: *mut _is = _PyInterpreterState_GET();
+    // It might be a core module (e.g. sys & builtins),
+    // for which we don't cache m_dict.
+    if ((unsafe { (*value).origin }) as u32) == 1 {
+        return get_core_module_dict(interp, name, path);
+    }
+    // XXX Switch to value->m_dict.
+    let m_dict: *mut _object = unsafe { (*(*value).def).m_base.m_copy };
+    Py_XINCREF!(m_dict);
+    m_dict
+}
+
+#[unsafe(link_section = ".text.slate_distinct.import.del_extensions_cache_value")]
+extern "C-unwind" fn del_extensions_cache_value(raw: *mut ()) {
+    let value: *mut extensions_cache_value = raw as *mut extensions_cache_value;
+    if !value.is_null() {
+        del_cached_m_dict(value);
+        del_cached_def(value);
+        free_extensions_cache_value(value);
+    }
+}
+
+fn hashtable_key_from_2_strings(str1: *mut _object, str2: *mut _object, sep: i8) -> *mut () {
+    let str1_data: *const i8 = unsafe { _PyUnicode_AsUTF8NoNUL(str1) };
+    let str2_data: *const i8 = unsafe { _PyUnicode_AsUTF8NoNUL(str2) };
+    if str1_data.is_null() || str2_data.is_null() {
+        return core::ptr::null_mut::<()>();
+    }
+    let str1_len: i64 = (unsafe { strlen(str1_data as *const core::ffi::c_char) as u64 }) as i64;
+    let str2_len: i64 = (unsafe { strlen(str2_data as *const core::ffi::c_char) as u64 }) as i64;
+    // Make sure sep and the NULL byte won't cause an overflow.
+    let size: u64 = str1_len
+        .wrapping_add(1)
+        .wrapping_add(str2_len)
+        .wrapping_add(1) as u64;
+    // XXX Use a buffer if it's a temp value (every case but "set").
+    let key: *mut i8 = (unsafe { PyMem_RawMalloc(size) }) as *mut i8;
+    if key.is_null() {
+        unsafe { PyErr_NoMemory() };
+        return core::ptr::null_mut::<()>();
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            ((str1_data as *const ()) as *const core::ffi::c_void) as *const u8,
+            ((key as *mut ()) as *mut core::ffi::c_void) as *mut u8,
+            ((str1_len as u64) as usize) as usize,
+        )
+    };
+    unsafe {
+        *key.wrapping_offset(str1_len as isize) = sep;
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            ((str2_data as *const ()) as *const core::ffi::c_void) as *const u8,
+            ((key
+                .wrapping_offset(str1_len as isize)
+                .wrapping_offset(1 as isize) as *mut ()) as *mut core::ffi::c_void)
+                as *mut u8,
+            ((str2_len as u64) as usize) as usize,
+        )
+    };
+    unsafe {
+        *key.wrapping_offset(size.wrapping_sub(1) as isize) = 0;
+    }
+    key as *mut ()
+}
+
+#[unsafe(link_section = ".text.slate_distinct.import.hashtable_hash_str")]
+extern "C-unwind" fn hashtable_hash_str(key: *const ()) -> u64 {
+    (unsafe {
+        Py_HashBuffer(
+            key,
+            (strlen((key as *const i8) as *const core::ffi::c_char) as u64) as i64,
+        )
+    }) as u64
+}
+
+#[unsafe(link_section = ".text.slate_distinct.import.hashtable_compare_str")]
+extern "C-unwind" fn hashtable_compare_str(key1: *const (), key2: *const ()) -> i32 {
+    ((unsafe {
+        strcmp(
+            (key1 as *const i8) as *const core::ffi::c_char,
+            (key2 as *const i8) as *const core::ffi::c_char,
+        ) as i32
+    }) == 0) as i32
+}
+
+#[unsafe(link_section = ".text.slate_distinct.import.hashtable_destroy_str")]
+extern "C-unwind" fn hashtable_destroy_str(ptr: *mut ()) {
+    unsafe { PyMem_RawFree(ptr) };
+}
+
+fn _extensions_cache_init() -> i32 {
+    let mut alloc: __SlateRecord_pycore_hashtable_h_56 = __SlateRecord_pycore_hashtable_h_56 {
+        malloc: unsafe {
+            core::mem::transmute::<*const (), Option<unsafe extern "C-unwind" fn(u64) -> *mut ()>>(
+                PyMem_RawMalloc as *const (),
+            )
+        },
+        free: unsafe {
+            core::mem::transmute::<*const (), Option<unsafe extern "C-unwind" fn(*mut ())>>(
+                PyMem_RawFree as *const (),
+            )
+        },
+    };
+    unsafe {
+        _PyRuntime.imports.extensions.hashtable = _Py_hashtable_new_full(
+            Some(hashtable_hash_str),
+            Some(hashtable_compare_str),
+            Some(hashtable_destroy_str),
+            Some(del_extensions_cache_value),
+            core::ptr::addr_of_mut!(alloc),
+        );
+    }
+    // key
+    // value
+    if unsafe { _PyRuntime.imports.extensions.hashtable }.is_null() {
+        unsafe { PyErr_NoMemory() };
+        return 1i32.wrapping_neg();
+    }
+    0
+}
+
+fn _extensions_cache_find_unlocked(
+    path: *mut _object,
+    name: *mut _object,
+    p_key: *mut *mut (),
+) -> *mut __SlateRecord_pycore_hashtable_h_35 {
+    if unsafe { _PyRuntime.imports.extensions.hashtable }.is_null() {
+        return core::ptr::null_mut::<__SlateRecord_pycore_hashtable_h_35>();
+    }
+    let key: *mut () = hashtable_key_from_2_strings(path, name, 58i8);
+    if key.is_null() {
+        return core::ptr::null_mut::<__SlateRecord_pycore_hashtable_h_35>();
+    }
+    let entry: *mut __SlateRecord_pycore_hashtable_h_35 = _Py_hashtable_get_entry(
+        unsafe { _PyRuntime.imports.extensions.hashtable },
+        key as *const (),
+    );
+    if !p_key.is_null() {
+        unsafe {
+            *p_key = key;
+        }
+    } else {
+        hashtable_destroy_str(key);
+    }
+    entry
+}
+
+/// This can only fail with "out of memory".
+fn _extensions_cache_get(path: *mut _object, name: *mut _object) -> *mut extensions_cache_value {
+    let mut entry: *mut __SlateRecord_pycore_hashtable_h_35 = unsafe { core::mem::zeroed() };
+    let mut value: *mut extensions_cache_value = unsafe { core::mem::zeroed() };
+    unsafe {
+        value = core::ptr::null_mut::<extensions_cache_value>();
+        extensions_lock_acquire();
+        entry = _extensions_cache_find_unlocked(path, name, core::ptr::null_mut::<*mut ()>());
+        if entry.is_null() {
+            // It was never added.
+        } else {
+            value = (*entry).value as *mut extensions_cache_value;
+        }
+        extensions_lock_release();
+        return value;
+    }
+}
+
+// This can only fail with "out of memory".
+fn _extensions_cache_set(
+    path: *mut _object,
+    name: *mut _object,
+    def: *mut PyModuleDef,
+    m_init: Option<unsafe extern "C-unwind" fn() -> *mut _object>,
+    m_index: i64,
+    m_dict: *mut _object,
+    origin: u32,
+    md_gil: *mut (),
+) -> *mut extensions_cache_value {
+    let mut __slate_compound_5: extensions_cache_value = unsafe { core::mem::zeroed() };
+    // Create a cached value to populate for the module.
+    let mut entry: *mut __SlateRecord_pycore_hashtable_h_35 = unsafe { core::mem::zeroed() };
+    let mut olddefbase: core::mem::MaybeUninit<PyModuleDef_Base> = core::mem::MaybeUninit::uninit();
+    let __slate_slot_1: *mut PyModuleDef_Base =
+        core::ptr::addr_of_mut!(olddefbase) as *mut PyModuleDef_Base;
+    let mut newvalue: *mut extensions_cache_value = unsafe { core::mem::zeroed() };
+    let mut key: *mut () = unsafe { core::mem::zeroed() };
+    let mut value: *mut extensions_cache_value = unsafe { core::mem::zeroed() };
+    unsafe {
+        '__join_2: {
+            '__join_6: {
+                value = core::ptr::null_mut::<extensions_cache_value>();
+                key = core::ptr::null_mut::<()>();
+                newvalue = core::ptr::null_mut::<extensions_cache_value>();
+                core::ptr::write(__slate_slot_1, (*def).m_base);
+                // We expect the same symbol to be used and the shared object file
+                // to have remained loaded, so it must be the same pointer.
+                // For now we don't worry about comparing value->m_copy.
+                extensions_lock_acquire();
+                if unsafe { _PyRuntime.imports.extensions.hashtable }.is_null() {
+                    if _extensions_cache_init() < 0 {
+                        break '__join_6;
+                    }
+                }
+                entry = _extensions_cache_find_unlocked(path, name, core::ptr::addr_of_mut!(key));
+                value = if entry.is_null() {
+                    core::ptr::null_mut::<extensions_cache_value>()
+                } else {
+                    (*entry).value as *mut extensions_cache_value
+                };
+                if !value.is_null() {
+                    // gh-123880: If there's an existing cache value, it means a module is
+                    // being imported recursively from its PyInit_* or Py_mod_* function.
+                    // (That function presumably handles returning a partially
+                    //  constructed module in such a case.)
+                    // We can reuse the existing cache value; it is owned by the cache.
+                    // (Entries get removed from it in exceptional circumstances,
+                    //  after interpreter shutdown, and in runtime shutdown.)
+                    break '__join_2;
+                } else {
+                    newvalue = alloc_extensions_cache_value();
+                    if !newvalue.is_null() {
+                        // Populate the new cache value data.
+                        *newvalue = *{
+                            __slate_compound_5 = {
+                                let mut __t0: extensions_cache_value = core::mem::zeroed();
+                                __t0.def = def;
+                                __t0.m_init = m_init;
+                                __t0.m_index = m_index;
+                                __t0.origin = origin;
+                                __t0
+                            };
+                            core::ptr::addr_of_mut!(__slate_compound_5)
+                        };
+                        // m_dict is set by set_cached_m_dict().
+                        if init_cached_m_dict(newvalue, m_dict) >= 0 {
+                            fixup_cached_def(newvalue);
+                            if entry.is_null() {
+                                // It was never added.
+                                if _Py_hashtable_set(
+                                    _PyRuntime.imports.extensions.hashtable,
+                                    key as *const (),
+                                    newvalue as *mut (),
+                                ) < 0
+                                {
+                                    PyErr_NoMemory();
+                                    break '__join_6;
+                                } else {
+                                    // The hashtable owns the key now.
+                                    key = core::ptr::null_mut::<()>();
+                                }
+                            } else {
+                                if value.is_null() {
+                                    // It was previously deleted.
+                                    (*entry).value = newvalue as *mut ();
+                                } else {
+                                    // We are updating the entry for an existing module.
+                                    //
+                                    // We expect def to be static, so it must be the same pointer.
+                                    // We expect the same symbol to be used and the shared object file
+                                    // to have remained loaded, so it must be the same pointer.
+                                    // The same module can't switch between caching __dict__ and not.
+                                    // This shouldn't ever happen.
+                                    Py_UNREACHABLE!();
+                                }
+                            }
+                            value = newvalue;
+                        }
+                    }
+                }
+            }
+            if value.is_null() {
+                restore_old_cached_def(def, &(*core::ptr::addr_of_mut!(*__slate_slot_1)));
+                if !newvalue.is_null() {
+                    del_extensions_cache_value(newvalue as *mut ());
+                }
+            } else {
+                cleanup_old_cached_def(core::ptr::addr_of_mut!(*__slate_slot_1));
+            }
+        }
+        extensions_lock_release();
+        if !key.is_null() {
+            hashtable_destroy_str(key);
+        }
+        return value;
+    }
+}
+
+fn _extensions_cache_delete(path: *mut _object, name: *mut _object) {
+    let mut entry: *mut __SlateRecord_pycore_hashtable_h_35 = unsafe { core::mem::zeroed() };
+    unsafe {
+        extensions_lock_acquire();
+        if unsafe { _PyRuntime.imports.extensions.hashtable }.is_null() {
+            // It was never added.
+        } else {
+            entry = _extensions_cache_find_unlocked(path, name, core::ptr::null_mut::<*mut ()>());
+            if entry.is_null() {
+                // It was never added.
+            } else {
+                if unsafe { (*entry).value }.is_null() {
+                    // It was already removed.
+                } else {
+                    let value: *mut extensions_cache_value =
+                        (*entry).value as *mut extensions_cache_value;
+                    (*entry).value = core::ptr::null_mut::<()>();
+                    del_extensions_cache_value(value as *mut ());
+                }
+            }
+        }
+        extensions_lock_release();
+    }
+}
+
+fn _extensions_cache_clear_all() {
+    // The runtime (i.e. main interpreter) must be finalizing,
+    // so we don't need to worry about the lock.
+    unsafe { _Py_hashtable_destroy(_PyRuntime.imports.extensions.hashtable) };
+    unsafe {
+        _PyRuntime.imports.extensions.hashtable = core::ptr::null_mut::<_Py_hashtable_t>();
+    }
+}
+
+fn check_multi_interp_extensions(interp: *mut _is) -> bool {
+    let r#override: i32 = OVERRIDE_MULTI_INTERP_EXTENSIONS_CHECK!(interp);
+    if r#override < 0 {
+        return false;
+    } else {
+        if r#override > 0 {
+            return true;
+        } else {
+            if (unsafe { _PyInterpreterState_HasFeature(interp, 256u64) }) != 0 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_CheckSubinterpIncompatibleExtensionAllowed(name: *const i8) -> i32 {
+    let interp: *mut _is = _PyInterpreterState_GET();
+    if check_multi_interp_extensions(interp) {
+        unsafe {
+            PyErr_Format(
+                PyExc_ImportError,
+                c"module %s does not support loading in subinterpreters".as_ptr(),
+                name,
+            )
+        };
+        return 1i32.wrapping_neg();
+    }
+    0
+}
+
+fn switch_to_main_interpreter(tstate: *mut _ts) -> *mut _ts {
+    if _Py_IsMainInterpreter(unsafe { (*tstate).interp }) != 0 {
+        return tstate;
+    }
+    let main_tstate: *mut _ts =
+        unsafe { _PyThreadState_NewBound(_PyInterpreterState_Main(), 5i32) };
+    if main_tstate.is_null() {
+        return core::ptr::null_mut::<_ts>();
+    }
+    unsafe { PyThreadState_Swap(main_tstate) };
+    main_tstate
+}
+
+fn switch_back_from_main_interpreter(
+    tstate: *mut _ts,
+    main_tstate: *mut _ts,
+    tempobj: *mut _object,
+) {
+    // Handle any exceptions, which we cannot propagate directly
+    // to the subinterpreter.
+    if !unsafe { PyErr_Occurred() }.is_null() {
+        if (unsafe { PyErr_ExceptionMatches(PyExc_MemoryError) }) != 0 {
+            // We trust it will be caught again soon.
+            unsafe { PyErr_Clear() };
+        } else {
+            // Printing the exception should be sufficient.
+            unsafe { PyErr_PrintEx(0i32) };
+        }
+    }
+    Py_XDECREF!(tempobj);
+    unsafe { PyThreadState_Clear(main_tstate) };
+    unsafe { PyThreadState_Swap(tstate) };
+    unsafe { PyThreadState_Delete(main_tstate) };
+}
+
+fn get_core_module_dict(interp: *mut _is, name: *mut _object, path: *mut _object) -> *mut _object {
+    // Only builtin modules are core.
+    if path == name {
+        if (unsafe { PyUnicode_CompareWithASCIIString(name, c"sys".as_ptr()) }) == 0 {
+            return Py_NewRef!(unsafe { (*interp).sysdict_copy });
+        }
+        if (unsafe { PyUnicode_CompareWithASCIIString(name, c"builtins".as_ptr()) }) == 0 {
+            return Py_NewRef!(unsafe { (*interp).builtins_copy });
+        }
+    }
+    core::ptr::null_mut::<_object>()
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct singlephase_global_update {
+    m_init: Option<unsafe extern "C-unwind" fn() -> *mut _object>,
+    m_index: i64,
+    m_dict: *mut _object,
+    origin: u32,
+    md_gil: *mut (),
+}
+
+fn update_global_state_for_extension(
+    tstate: *mut _ts,
+    path: *mut _object,
+    name: *mut _object,
+    def: *mut PyModuleDef,
+    singlephase: *mut singlephase_global_update,
+) -> *mut extensions_cache_value {
+    let mut cached: *mut extensions_cache_value = core::ptr::null_mut::<extensions_cache_value>();
+    let mut m_init: Option<unsafe extern "C-unwind" fn() -> *mut _object> = None;
+    let mut m_dict: *mut _object = core::ptr::null_mut::<_object>();
+    // Set up for _extensions_cache_set().
+    if !singlephase.is_null() {
+        if (unsafe { (*singlephase).m_init }) != None {
+            // Remember pointer to module init function.
+            //
+            // XXX If two modules share a def then def->m_base will
+            //
+            // reflect the last one added (here) to the global cache.
+            //
+            // We should prevent this somehow.  The simplest solution
+            //
+            // is probably to store m_copy/m_init in the cache along
+            //
+            // with the def, rather than within the def.
+            m_init = unsafe { (*singlephase).m_init };
+        } else {
+            if unsafe { (*singlephase).m_dict }.is_null() {
+                // It must be a core builtin module.
+            } else {
+                // gh-88216: Extensions and def->m_base.m_copy can be updated
+                //
+                // when the extension module doesn't support sub-interpreters.
+                m_dict = unsafe { (*singlephase).m_dict };
+            }
+        }
+    }
+    // Add the module's def to the global cache.
+    //
+    // XXX Why special-case the main interpreter?
+    if _Py_IsMainInterpreter(unsafe { (*tstate).interp }) != 0
+        || (unsafe { (*def).m_size }) == (1i32.wrapping_neg() as i64)
+    {
+        cached = _extensions_cache_set(
+            path,
+            name,
+            def,
+            m_init,
+            unsafe { (*singlephase).m_index },
+            m_dict,
+            unsafe { (*singlephase).origin },
+            unsafe { (*singlephase).md_gil },
+        );
+        if cached.is_null() {
+            // XXX Ignore this error?  Doing so would effectively
+            //
+            // mark the module as not loadable.
+            return core::ptr::null_mut::<extensions_cache_value>();
+        }
+    }
+    cached
+}
+
+/// For multi-phase init modules, the module is finished
+/// by PyModule_FromDefAndSpec().
+fn finish_singlephase_extension(
+    tstate: *mut _ts,
+    r#mod: *mut _object,
+    cached: *mut extensions_cache_value,
+    name: *mut _object,
+    modules: *mut _object,
+) -> i32 {
+    let index: i64 = _get_cached_module_index(cached);
+    if _modules_by_index_set(unsafe { (*tstate).interp }, index, r#mod) < 0 {
+        return 1i32.wrapping_neg();
+    }
+    if !modules.is_null() {
+        if (unsafe { PyObject_SetItem(modules, name, r#mod) }) < 0 {
+            return 1i32.wrapping_neg();
+        }
+    }
+    0
+}
+
+fn reload_singlephase_extension(
+    tstate: *mut _ts,
+    cached: *mut extensions_cache_value,
+    info: *mut _Py_ext_module_loader_info,
+) -> *mut _object {
+    let def: *mut PyModuleDef = unsafe { (*cached).def };
+    let mut r#mod: *mut _object = core::ptr::null_mut::<_object>();
+    // It may have been successfully imported previously
+    // in an interpreter that allows legacy modules
+    // but is not allowed in the current interpreter.
+    let name_buf: *const i8 = unsafe { PyUnicode_AsUTF8((*info).name) };
+    if _PyImport_CheckSubinterpIncompatibleExtensionAllowed(name_buf) < 0 {
+        return core::ptr::null_mut::<_object>();
+    }
+    let modules: *mut _object = get_modules_dict(tstate, true);
+    if (unsafe { (*def).m_size }) == (1i32.wrapping_neg() as i64) {
+        // Module does not support repeated initialization
+        // XXX Copying the cached dict may break interpreter isolation.
+        //
+        // We could solve this by temporarily acquiring the original
+        //
+        // interpreter's GIL.
+        let m_copy: *mut _object =
+            get_cached_m_dict(cached, unsafe { (*info).name }, unsafe { (*info).path });
+        if m_copy.is_null() {
+            return core::ptr::null_mut::<_object>();
+        }
+        r#mod = import_add_module(tstate, unsafe { (*info).name });
+        if r#mod.is_null() {
+            Py_DECREF!(m_copy);
+            return core::ptr::null_mut::<_object>();
+        }
+        let mdict: *mut _object = unsafe { PyModule_GetDict(r#mod) };
+        if mdict.is_null() {
+            Py_DECREF!(m_copy);
+            Py_DECREF!(r#mod);
+            return core::ptr::null_mut::<_object>();
+        }
+        let rc: i32 = unsafe { PyDict_Update(mdict, m_copy) };
+        Py_DECREF!(m_copy);
+        if rc < 0 {
+            Py_DECREF!(r#mod);
+            return core::ptr::null_mut::<_object>();
+        }
+    // We can't set mod->md_def if it's missing,
+    // because _PyImport_ClearModulesByIndex() might break
+    // due to violating interpreter isolation.
+    // See the note in set_cached_m_dict().
+    // Until that is solved, we leave md_def set to NULL.
+    } else {
+        // XXX Use cached->m_init.
+        let p0: Option<unsafe extern "C-unwind" fn() -> *mut _object> =
+            unsafe { (*def).m_base.m_init };
+        if p0 == None {
+            return core::ptr::null_mut::<_object>();
+        }
+        let mut res: _Py_ext_module_loader_result = unsafe { core::mem::zeroed() };
+        if (unsafe { _PyImport_RunModInitFunc(p0, info, core::ptr::addr_of_mut!(res)) }) < 0 {
+            unsafe {
+                _Py_ext_module_loader_result_apply_error(core::ptr::addr_of_mut!(res), name_buf)
+            };
+            return core::ptr::null_mut::<_object>();
+        }
+        r#mod = res.module;
+        // Tchnically, the init function could return a different module def.
+        // Then we would probably need to update the global cache.
+        // However, we don't expect anyone to change the def.
+        unsafe { _Py_ext_module_loader_result_clear(core::ptr::addr_of_mut!(res)) };
+        // Remember the filename as the __file__ attribute
+        if !unsafe { (*info).filename }.is_null() {
+            if (unsafe { PyModule_AddObjectRef(r#mod, c"__file__".as_ptr(), (*info).filename) }) < 0
+            {
+                unsafe { PyErr_Clear() }; // Not important enough to report
+            }
+        }
+        if (unsafe { PyObject_SetItem(modules, (*info).name, r#mod) }) == 1i32.wrapping_neg() {
+            Py_DECREF!(r#mod);
+            return core::ptr::null_mut::<_object>();
+        }
+    }
+    let index: i64 = _get_cached_module_index(cached);
+    if _modules_by_index_set(unsafe { (*tstate).interp }, index, r#mod) < 0 {
+        PyMapping_DelItem__2!(modules, unsafe { (*info).name });
+        Py_DECREF!(r#mod);
+        return core::ptr::null_mut::<_object>();
+    }
+    r#mod
+}
+
+fn import_find_extension(
+    tstate: *mut _ts,
+    info: *mut _Py_ext_module_loader_info,
+    p_cached: &mut *mut extensions_cache_value,
+) -> *mut _object {
+    // Only single-phase init modules will be in the cache.
+    let cached: *mut extensions_cache_value =
+        _extensions_cache_get(unsafe { (*info).path }, unsafe { (*info).name });
+    if cached.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    unsafe {
+        *(p_cached as *mut *mut extensions_cache_value) = cached;
+    }
+    // It may have been successfully imported previously
+    // in an interpreter that allows legacy modules
+    // but is not allowed in the current interpreter.
+    let name_buf: *const i8 = unsafe { PyUnicode_AsUTF8((*info).name) };
+    if _PyImport_CheckSubinterpIncompatibleExtensionAllowed(name_buf) < 0 {
+        return core::ptr::null_mut::<_object>();
+    }
+    let r#mod: *mut _object = reload_singlephase_extension(tstate, cached, info);
+    if r#mod.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let verbose: i32 = unsafe { (*_PyInterpreterState_GetConfig((*tstate).interp)).verbose };
+    if verbose != 0 {
+        unsafe {
+            PySys_FormatStderr(
+                c"import %U # previously loaded (%R)\n".as_ptr(),
+                (*info).name,
+                (*info).path,
+            )
+        };
+    }
+    r#mod
+}
+
+fn import_run_extension(
+    tstate: *mut _ts,
+    p0: Option<unsafe extern "C-unwind" fn() -> *mut _object>,
+    info: *mut _Py_ext_module_loader_info,
+    spec: *mut _object,
+    modules: *mut _object,
+) -> *mut _object {
+    // XXX Modules that share a def should each get their own index,
+    //
+    // whereas currently they share (which means the per-interpreter
+    //
+    // cache is less reliable than it should be).
+    let mut singlephase: core::mem::MaybeUninit<singlephase_global_update> =
+        core::mem::MaybeUninit::uninit();
+    let __slate_slot_1: *mut singlephase_global_update =
+        core::ptr::addr_of_mut!(singlephase) as *mut singlephase_global_update;
+    let mut filename: *mut _object = unsafe { core::mem::zeroed() };
+    let mut rc: i32 = unsafe { core::mem::zeroed() };
+    let mut res: core::mem::MaybeUninit<_Py_ext_module_loader_result> =
+        core::mem::MaybeUninit::uninit();
+    let __slate_slot_5: *mut _Py_ext_module_loader_result =
+        core::ptr::addr_of_mut!(res) as *mut _Py_ext_module_loader_result;
+    // We *could* leave in place a legacy interpreter here
+    // (one that shares obmalloc/GIL with main interp),
+    // but there isn't a big advantage, we anticipate
+    // such interpreters will be increasingly uncommon,
+    // and the code is a bit simpler if we always switch
+    // to the main interpreter.
+    let mut main_tstate: *mut _ts = unsafe { core::mem::zeroed() };
+    let mut switched: bool = unsafe { core::mem::zeroed() };
+    let mut name_buf: *const i8 = unsafe { core::mem::zeroed() };
+    let mut cached: *mut extensions_cache_value = unsafe { core::mem::zeroed() };
+    let mut def: *mut PyModuleDef = unsafe { core::mem::zeroed() };
+    let mut r#mod: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        // Core modules go through _PyImport_FixupBuiltin().
+        r#mod = core::ptr::null_mut::<_object>();
+        def = core::ptr::null_mut::<PyModuleDef>();
+        cached = core::ptr::null_mut::<extensions_cache_value>();
+        name_buf = PyBytes_AS_STRING!(unsafe { (*info).name_encoded }) as *const i8;
+        // We cannot know if the module is single-phase init or
+        // multi-phase init until after we call its init function. Even
+        // in isolated interpreters (that do not support single-phase init),
+        // the init function will run without restriction.  For multi-phase
+        // init modules that isn't a problem because the init function only
+        // runs PyModuleDef_Init() on the module's def and then returns it.
+        //
+        // However, for single-phase init the module's init function will
+        // create the module, create other objects (and allocate other
+        // memory), populate it and its module state, and initialize static
+        // types.  Some modules store other objects and data in global C
+        // variables and register callbacks with the runtime/stdlib or
+        // even external libraries (which is part of why we can't just
+        // dlclose() the module in the error case).  That's a problem
+        // for isolated interpreters since all of the above happens
+        // and only then * will the import fail.  Memory will leak,
+        // callbacks will still get used, and sometimes there
+        // will be crashes (memory access violations
+        // and use-after-free).
+        //
+        // To put it another way, if the module is single-phase init
+        // then the import will probably break interpreter isolation
+        // and should fail ASAP.  However, the module's init function
+        // will still get run.  That means it may still store state
+        // in the shared-object/DLL address space (which never gets
+        // closed/cleared), including objects (e.g. static types).
+        // This is a problem for isolated subinterpreters since each
+        // has its own object allocator.  If the loaded shared-object
+        // still holds a reference to an object after the corresponding
+        // interpreter has finalized then either we must let it leak
+        // or else any later use of that object by another interpreter
+        // (or across multiple init-fini cycles) will crash the process.
+        //
+        // To avoid all of that, we make sure the module's init function
+        // is always run first with the main interpreter active.  If it was
+        // already the main interpreter then we can continue loading the
+        // module like normal.  Otherwise, right after the init function,
+        // we take care of some import state bookkeeping, switch back
+        // to the subinterpreter, check for single-phase init,
+        // and then continue loading like normal.
+        switched = false;
+        main_tstate = switch_to_main_interpreter(tstate);
+        if main_tstate.is_null() {
+            return core::ptr::null_mut::<_object>();
+        } else {
+            if main_tstate != tstate {
+                switched = true;
+                // In the switched case, we could play it safe
+                // by getting the main interpreter's import lock here.
+                // It's unlikely to matter though.
+            }
+            rc = _PyImport_RunModInitFunc(p0, info, core::ptr::addr_of_mut!(*__slate_slot_5));
+            if rc < 0 {
+                // We discard res.def.
+            } else {
+                r#mod = (*__slate_slot_5).module;
+                (*__slate_slot_5).module = core::ptr::null_mut::<_object>();
+                def = (*__slate_slot_5).def;
+                // Do anything else that should be done
+                // while still using the main interpreter.
+                if ((*__slate_slot_5).kind as u32) == 1 {
+                    // Remember the filename as the __file__ attribute
+                    if !unsafe { (*info).filename }.is_null() {
+                        filename = core::ptr::null_mut::<_object>();
+                        if switched {
+                            // The original filename may be allocated by subinterpreter's
+                            //
+                            // obmalloc, so we create a copy here.
+                            filename = _PyUnicode_Copy((*info).filename);
+                            if filename.is_null() {
+                                return core::ptr::null_mut::<_object>();
+                            }
+                        } else {
+                            filename = Py_NewRef!(unsafe { (*info).filename });
+                        }
+                        // XXX There's a refleak somewhere with the filename.
+                        //
+                        // Until we can track it down, we immortalize it.
+                        let interp: *mut _is = _PyInterpreterState_GET();
+                        _PyUnicode_InternImmortal(interp, core::ptr::addr_of_mut!(filename));
+                        if PyModule_AddObjectRef(r#mod, c"__file__".as_ptr(), filename) < 0 {
+                            PyErr_Clear(); // Not important enough to report
+                        }
+                    }
+                    // Update global import state.
+                    core::ptr::write(__slate_slot_1, {
+                        let mut __t0: singlephase_global_update = core::mem::zeroed();
+                        __t0.m_index = (*def).m_base.m_index;
+                        __t0.origin = (*info).origin;
+                        __t0
+                    });
+                    // gh-88216: Extensions and def->m_base.m_copy can be updated
+                    //
+                    // when the extension module doesn't support sub-interpreters.
+                    if (*def).m_size == (1i32.wrapping_neg() as i64) {
+                        // We will reload from m_copy.
+                        (*__slate_slot_1).m_dict = PyModule_GetDict(r#mod);
+                    } else {
+                        // We will reload via the init function.
+                        (*__slate_slot_1).m_init = p0;
+                    }
+                    cached = update_global_state_for_extension(
+                        main_tstate,
+                        (*info).path,
+                        (*info).name,
+                        def,
+                        core::ptr::addr_of_mut!(*__slate_slot_1),
+                    );
+                    if cached.is_null() {}
+                }
+            }
+            if rc < 0 {
+                _Py_ext_module_loader_result_apply_error(
+                    core::ptr::addr_of_mut!(*__slate_slot_5),
+                    name_buf,
+                );
+            }
+            '__join_0: {
+                // Switch back to the subinterpreter.
+                if switched {
+                    // gh-144601: The exception object can't be transferred across
+                    //
+                    // interpreters. Instead, we print out an unraisable exception, and
+                    //
+                    // then raise a different exception for the calling interpreter.
+                    if rc < 0 {
+                        PyErr_FormatUnraisable(
+                            c"Exception while importing from subinterpreter".as_ptr(),
+                        );
+                    }
+                    switch_back_from_main_interpreter(tstate, main_tstate, r#mod);
+                    // Any module we got from the init function will have to be
+                    // reloaded in the subinterpreter.
+                    r#mod = core::ptr::null_mut::<_object>();
+                    if rc < 0 {
+                        PyErr_SetString(
+                            PyExc_ImportError,
+                            c"failed to import from subinterpreter due to exception".as_ptr(),
+                        );
+                        break '__join_0;
+                    }
+                }
+                // At this point we are back to the interpreter we started with.
+                // Finally we handle the error return from _PyImport_RunModInitFunc().
+                if rc >= 0 {
+                    if ((*__slate_slot_5).kind as u32) == 2 {
+                        // Note that we cheat a little by not repeating the calls
+                        // to _PyImport_GetModInitFunc() and _PyImport_RunModInitFunc().
+                        r#mod = PyModule_FromDefAndSpec!(def, spec);
+                        if r#mod.is_null() {
+                            break '__join_0;
+                        }
+                    } else {
+                        if _PyImport_CheckSubinterpIncompatibleExtensionAllowed(name_buf) < 0 {
+                            break '__join_0;
+                        } else {
+                            if switched {
+                                // We switched to the main interpreter to run the init
+                                // function, so now we will "reload" the module from the
+                                // cached data using the original subinterpreter.
+                                r#mod = reload_singlephase_extension(tstate, cached, info);
+                                if r#mod.is_null() {
+                                    break '__join_0;
+                                }
+                            } else {
+                                // Update per-interpreter import state.
+                                let modules__1: *mut _object = get_modules_dict(tstate, true);
+                                if finish_singlephase_extension(
+                                    tstate,
+                                    r#mod,
+                                    cached,
+                                    (*info).name,
+                                    modules__1,
+                                ) < 0
+                                {
+                                    break '__join_0;
+                                }
+                            }
+                        }
+                    }
+                    _Py_ext_module_loader_result_clear(core::ptr::addr_of_mut!(*__slate_slot_5));
+                    return r#mod;
+                }
+            }
+            Py_XDECREF!(r#mod);
+            _Py_ext_module_loader_result_clear(core::ptr::addr_of_mut!(*__slate_slot_5));
+            return core::ptr::null_mut::<_object>();
+        }
+    }
+}
+
+/// Used in _PyImport_ClearExtension; see notes there.
+fn clear_singlephase_extension(interp: *mut _is, name: *mut _object, path: *mut _object) -> i32 {
+    let cached: *mut extensions_cache_value = _extensions_cache_get(path, name);
+    if cached.is_null() {
+        if !unsafe { PyErr_Occurred() }.is_null() {
+            return 1i32.wrapping_neg();
+        }
+        return 0;
+    }
+    let def: *mut PyModuleDef = unsafe { (*cached).def };
+    // Clear data set when the module was initially loaded.
+    unsafe {
+        (*def).m_base.m_init = None;
+    }
+    Py_CLEAR!((*def).m_base.m_copy);
+    unsafe {
+        (*def).m_base.m_index = 0;
+    }
+    // Clear the PyState_*Module() cache entry.
+    let index: i64 = _get_cached_module_index(cached);
+    if _modules_by_index_check(interp, index).is_null() {
+        if _modules_by_index_clear_one(interp, index) < 0 {
+            return 1i32.wrapping_neg();
+        }
+    }
+    // We must use the main interpreter to clean up the cache.
+    // See the note in import_run_extension().
+    let tstate: *mut _ts = PyThreadState_GET!();
+    let main_tstate: *mut _ts = switch_to_main_interpreter(tstate);
+    if main_tstate.is_null() {
+        return 1i32.wrapping_neg();
+    }
+    // Clear the cached module def.
+    _extensions_cache_delete(path, name);
+    if main_tstate != tstate {
+        switch_back_from_main_interpreter(tstate, main_tstate, core::ptr::null_mut::<_object>());
+    }
+    0
+}
+
+// builtin modules
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_FixupBuiltin(
+    tstate: *mut _ts,
+    r#mod: *mut _object,
+    name: *const i8,
+    modules: *mut _object,
+) -> i32 {
+    // We don't want def->m_base.m_copy populated.
+    let mut singlephase: core::mem::MaybeUninit<singlephase_global_update> =
+        core::mem::MaybeUninit::uninit();
+    let __slate_slot_0: *mut singlephase_global_update =
+        core::ptr::addr_of_mut!(singlephase) as *mut singlephase_global_update;
+    // We aren't using import_find_extension() for core modules,
+    // so we have to do the extra check to make sure the module
+    // isn't already in the global cache before calling
+    // update_global_state_for_extension().
+    let mut cached: *mut extensions_cache_value = unsafe { core::mem::zeroed() };
+    let mut def: *mut PyModuleDef = unsafe { core::mem::zeroed() };
+    let mut nameobj: *mut _object = unsafe { core::mem::zeroed() };
+    let mut res: i32 = unsafe { core::mem::zeroed() };
+    unsafe {
+        res = 1i32.wrapping_neg();
+        nameobj = PyUnicode_InternFromString(name);
+        if nameobj.is_null() {
+            return 1i32.wrapping_neg();
+        } else {
+            '__join_0: {
+                def = PyModule_GetDef(r#mod);
+                if def.is_null() {
+                    PyErr_BadInternalCall__124!();
+                } else {
+                    // We only use _PyImport_FixupBuiltin() for the core builtin modules
+                    // (sys and builtins).  These modules are single-phase init with no
+                    // module state, but we also don't populate def->m_base.m_copy
+                    // for them.
+                    cached = _extensions_cache_get(nameobj, nameobj);
+                    if cached.is_null() {
+                        core::ptr::write(__slate_slot_0, {
+                            let mut __t0: singlephase_global_update = core::mem::zeroed();
+                            __t0.m_index = (*def).m_base.m_index;
+                            __t0.m_dict = core::ptr::null_mut::<_object>();
+                            __t0.origin = 1u32;
+                            __t0
+                        });
+                        cached = update_global_state_for_extension(
+                            tstate,
+                            nameobj,
+                            nameobj,
+                            def,
+                            core::ptr::addr_of_mut!(*__slate_slot_0),
+                        );
+                        if cached.is_null() {
+                            break '__join_0;
+                        }
+                    }
+                    if finish_singlephase_extension(tstate, r#mod, cached, nameobj, modules) >= 0 {
+                        res = 0;
+                    }
+                }
+            }
+            Py_DECREF!(nameobj);
+            return res;
+        }
+    }
+}
+
+// Helper to test for built-in module
+fn is_builtin(name: *mut _object) -> i32 {
+    let mut i: i32 = 0;
+    let inittab: *mut _inittab = unsafe { _PyRuntime.imports.inittab };
+    while !unsafe { (*inittab.wrapping_offset(i as isize)).name }.is_null() {
+        if (unsafe {
+            _PyUnicode_EqualToASCIIString(name, (*inittab.wrapping_offset(i as isize)).name)
+        }) != 0
+        {
+            if (unsafe { (*inittab.wrapping_offset(i as isize)).initfunc }) == None {
+                return 1i32.wrapping_neg();
+            } else {
+                return 1;
+            }
+        }
+        i = i.wrapping_add(1);
+    }
+    0
+}
+
+fn create_builtin(tstate: *mut _ts, name: *mut _object, spec: *mut _object) -> *mut _object {
+    let mut p0: core::mem::MaybeUninit<Option<unsafe extern "C-unwind" fn() -> *mut _object>> =
+        core::mem::MaybeUninit::uninit();
+    let __slate_slot_0: *mut Option<unsafe extern "C-unwind" fn() -> *mut _object> =
+        core::ptr::addr_of_mut!(p0) as *mut Option<unsafe extern "C-unwind" fn() -> *mut _object>;
+    let mut p: *mut _inittab = unsafe { core::mem::zeroed() };
+    let mut found: *mut _inittab = unsafe { core::mem::zeroed() };
+    let mut r#mod: *mut _object = unsafe { core::mem::zeroed() };
+    let mut cached: *mut extensions_cache_value = unsafe { core::mem::zeroed() };
+    let mut info: core::mem::MaybeUninit<_Py_ext_module_loader_info> =
+        core::mem::MaybeUninit::uninit();
+    let __slate_slot_7: *mut _Py_ext_module_loader_info =
+        core::ptr::addr_of_mut!(info) as *mut _Py_ext_module_loader_info;
+    unsafe {
+        if _Py_ext_module_loader_info_init_for_builtin(
+            core::ptr::addr_of_mut!(*__slate_slot_7),
+            name,
+        ) < 0
+        {
+            return core::ptr::null_mut::<_object>();
+        } else {
+            cached = core::ptr::null_mut::<extensions_cache_value>();
+            r#mod = import_find_extension(
+                tstate,
+                core::ptr::addr_of_mut!(*__slate_slot_7),
+                &mut (*core::ptr::addr_of_mut!(cached)),
+            );
+            if !r#mod.is_null() {
+                // The module might not have md_def set in certain reload cases.
+            } else {
+                if _PyErr_Occurred(tstate).is_null() {
+                    // If the module was added to the global cache
+                    // but def->m_base.m_copy was cleared (e.g. subinterp fini)
+                    // then we have to do a little dance here.
+                    if !cached.is_null() {
+                        // For now we clear the cache and move on.
+                        _extensions_cache_delete((*__slate_slot_7).path, (*__slate_slot_7).name);
+                    }
+                    found = core::ptr::null_mut::<_inittab>();
+                    p = _PyRuntime.imports.inittab;
+                    while !unsafe { (*p).name }.is_null() {
+                        if _PyUnicode_EqualToASCIIString((*__slate_slot_7).name, (*p).name) != 0 {
+                            found = p;
+                        }
+                        let __v2: *mut _inittab = p;
+                        p = __v2.wrapping_offset(1 as isize);
+                    }
+                    if found.is_null() {
+                        // not found
+                        r#mod = Py_NewRef!(core::ptr::addr_of_mut!(_Py_NoneStruct));
+                    } else {
+                        core::ptr::write(__slate_slot_0, (*found).initfunc);
+                        if *__slate_slot_0 == None {
+                            // Cannot re-init internal module ("sys" or "builtins")
+                            r#mod = import_add_module(tstate, (*__slate_slot_7).name);
+                        } else {
+                            // Now load it.
+                            r#mod = import_run_extension(
+                                tstate,
+                                *__slate_slot_0,
+                                core::ptr::addr_of_mut!(*__slate_slot_7),
+                                spec,
+                                get_modules_dict(tstate, true),
+                            );
+                        }
+                    }
+                }
+            }
+            _Py_ext_module_loader_info_clear(core::ptr::addr_of_mut!(*__slate_slot_7));
+            return r#mod;
+        }
+    }
+}
+
+// the builtin modules table
+// API for embedding applications that want to add their own entries
+// to the table of built-in modules.  This should normally be called
+// *before* Py_Initialize().  When the table resize fails, -1 is
+// returned and the existing table is unchanged.
+//
+// After a similar function by Just van Rossum.
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ExtendInittab(newtab: *mut _inittab) -> i32 {
+    let mut res: i32 = unsafe { core::mem::zeroed() };
+    let mut n: u64 = unsafe { core::mem::zeroed() };
+    let mut i: u64 = unsafe { core::mem::zeroed() };
+    let mut p: *mut _inittab = unsafe { core::mem::zeroed() };
+    unsafe {
+        res = 0;
+        if !unsafe { _PyRuntime.imports.inittab }.is_null() {
+            Py_FatalError__34!(
+                c"PyImport_ExtendInittab() may not be called after Py_Initialize()".as_ptr()
+                    as *mut i8
+            );
+        }
+        // Count the number of entries in both tables
+        n = 0;
+        while !unsafe { (*newtab.wrapping_offset(n as isize)).name }.is_null() {
+            n = n.wrapping_add(1);
+        }
+        if n == 0 {
+            return 0;
+        } else {
+            // Nothing to do
+            i = 0;
+            while !unsafe { (*unsafe { PyImport_Inittab }.wrapping_offset(i as isize)).name }
+                .is_null()
+            {
+                i = i.wrapping_add(1);
+            }
+            // Force default raw memory allocator to get a known allocator to be able
+            // to release the memory in _PyImport_Fini2()
+            //
+            // Allocate new memory for the combined table
+            p = core::ptr::null_mut::<_inittab>();
+            if i.wrapping_add(n)
+                <= (18446744073709551615 / (core::mem::size_of::<_inittab>() as u64))
+                    .wrapping_sub(1)
+            {
+                let size: u64 = (core::mem::size_of::<_inittab>() as u64)
+                    .wrapping_mul(i.wrapping_add(n).wrapping_add(1));
+                p = _PyMem_DefaultRawRealloc(inittab_copy as *mut (), size) as *mut _inittab;
+            }
+            if p.is_null() {
+                res = 1i32.wrapping_neg();
+            } else {
+                // Copy the tables into the new memory at the first call
+                // to PyImport_ExtendInittab().
+                if inittab_copy != PyImport_Inittab {
+                    core::ptr::copy_nonoverlapping(
+                        ((PyImport_Inittab as *const ()) as *const core::ffi::c_void) as *const u8,
+                        ((p as *mut ()) as *mut core::ffi::c_void) as *mut u8,
+                        (i.wrapping_add(1)
+                            .wrapping_mul(core::mem::size_of::<_inittab>() as u64)
+                            as usize) as usize,
+                    );
+                }
+                core::ptr::copy_nonoverlapping(
+                    ((newtab as *const ()) as *const core::ffi::c_void) as *const u8,
+                    ((p.wrapping_offset(i as isize) as *mut ()) as *mut core::ffi::c_void)
+                        as *mut u8,
+                    (n.wrapping_add(1)
+                        .wrapping_mul(core::mem::size_of::<_inittab>() as u64)
+                        as usize) as usize,
+                );
+                let __v0: *mut _inittab = p;
+                inittab_copy = __v0;
+                PyImport_Inittab = __v0;
+            }
+            return res;
+        }
+    }
+}
+
+// Shorthand to add a single entry given a name and a function
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_AppendInittab(
+    name: *const i8,
+    initfunc: Option<unsafe extern "C-unwind" fn() -> *mut _object>,
+) -> i32 {
+    let mut newtab: __SlateAlign16<[_inittab; 2]> = __SlateAlign16(unsafe { core::mem::zeroed() });
+    if !unsafe { _PyRuntime.imports.inittab }.is_null() {
+        Py_FatalError__26!(
+            c"PyImport_AppendInittab() may not be called after Py_Initialize()".as_ptr() as *mut i8
+        );
+    }
+    unsafe {
+        core::ptr::write_bytes(
+            ((newtab.0.as_mut_ptr() as *mut ()) as *mut core::ffi::c_void) as *mut u8,
+            (0i32 as i32) as u8,
+            ((core::mem::size_of::<[_inittab; 2]>() as u64) as usize) as usize,
+        )
+    };
+    newtab.0[0].name = name;
+    newtab.0[0].initfunc = initfunc;
+    PyImport_ExtendInittab(newtab.0.as_mut_ptr() as *mut _inittab)
+}
+
+// the internal table
+fn init_builtin_modules_table() -> i32 {
+    let mut size: u64 = 0;
+    while !unsafe { (*unsafe { PyImport_Inittab }.wrapping_offset(size as isize)).name }.is_null() {
+        size = size.wrapping_add(1);
+    }
+    size = size.wrapping_add(1);
+    // Make the copy.
+    let copied: *mut _inittab = (unsafe {
+        _PyMem_DefaultRawMalloc(size.wrapping_mul(core::mem::size_of::<_inittab>() as u64))
+    }) as *mut _inittab;
+    if copied.is_null() {
+        return 1i32.wrapping_neg();
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            ((PyImport_Inittab as *const ()) as *const core::ffi::c_void) as *const u8,
+            ((copied as *mut ()) as *mut core::ffi::c_void) as *mut u8,
+            (size.wrapping_mul(core::mem::size_of::<_inittab>() as u64) as usize) as usize,
+        )
+    };
+    unsafe {
+        _PyRuntime.imports.inittab = copied;
+    }
+    0
+}
+
+fn fini_builtin_modules_table() {
+    let inittab: *mut _inittab = unsafe { _PyRuntime.imports.inittab };
+    unsafe {
+        _PyRuntime.imports.inittab = core::ptr::null_mut::<_inittab>();
+    }
+    unsafe { _PyMem_DefaultRawFree(inittab as *mut ()) };
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_GetBuiltinModuleNames() -> *mut _object {
+    let list: *mut _object = unsafe { PyList_New(0i64) };
+    if list.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let inittab: *mut _inittab = unsafe { _PyRuntime.imports.inittab };
+    let mut i: i64 = 0;
+    while !unsafe { (*inittab.wrapping_offset(i as isize)).name }.is_null() {
+        let name: *mut _object =
+            unsafe { PyUnicode_FromString((*inittab.wrapping_offset(i as isize)).name) };
+        if name.is_null() {
+            Py_DECREF!(list);
+            return core::ptr::null_mut::<_object>();
+        }
+        if (unsafe { PyList_Append(list, name) }) < 0 {
+            Py_DECREF!(name);
+            Py_DECREF!(list);
+            return core::ptr::null_mut::<_object>();
+        }
+        Py_DECREF!(name);
+        i = i.wrapping_add(1);
+    }
+    list
+}
+
+// the magic number
+// Helper for pythonrun.c -- return magic number and tag.
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_GetMagicNumber() -> i64 {
+    168627755i64
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_GetMagicTag() -> *const i8 {
+    unsafe { _PySys_ImplCacheTag }
+}
+
+// a Python module's code object
+/// Execute a code object in a module and return the module object
+/// WITH INCREMENTED REFERENCE COUNT.  If an error occurs, name is
+/// removed from sys.modules, to avoid leaving damaged module objects
+/// in sys.modules.  The caller may wish to restore the original
+/// module object (if any) in this case; PyImport_ReloadModule is an
+/// example.
+///
+/// Note that PyImport_ExecCodeModuleWithPathnames() is the preferred, richer
+/// interface.  The other two exist primarily for backward compatibility.
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ExecCodeModule(name: *const i8, co: *mut _object) -> *mut _object {
+    PyImport_ExecCodeModuleWithPathnames(
+        name,
+        co,
+        core::ptr::null_mut::<i8>() as *const i8,
+        core::ptr::null_mut::<i8>() as *const i8,
+    )
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ExecCodeModuleEx(
+    name: *const i8,
+    co: *mut _object,
+    pathname: *const i8,
+) -> *mut _object {
+    PyImport_ExecCodeModuleWithPathnames(
+        name,
+        co,
+        pathname,
+        core::ptr::null_mut::<i8>() as *const i8,
+    )
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ExecCodeModuleWithPathnames(
+    name: *const i8,
+    co: *mut _object,
+    pathname: *const i8,
+    cpathname: *const i8,
+) -> *mut _object {
+    let mut interp: *mut _is = unsafe { core::mem::zeroed() };
+    let mut external: *mut _object = unsafe { core::mem::zeroed() };
+    let mut cpathobj: *mut _object = unsafe { core::mem::zeroed() };
+    let mut pathobj: *mut _object = unsafe { core::mem::zeroed() };
+    let mut nameobj: *mut _object = unsafe { core::mem::zeroed() };
+    let mut m: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        m = core::ptr::null_mut::<_object>();
+        pathobj = core::ptr::null_mut::<_object>();
+        cpathobj = core::ptr::null_mut::<_object>();
+        external = core::ptr::null_mut::<_object>();
+        nameobj = PyUnicode_FromString(name);
+        if nameobj.is_null() {
+            return core::ptr::null_mut::<_object>();
+        } else {
+            '__join_0: {
+                if !cpathname.is_null() {
+                    cpathobj = PyUnicode_DecodeFSDefault(cpathname);
+                    if cpathobj.is_null() {
+                        break '__join_0;
+                    }
+                } else {
+                    cpathobj = core::ptr::null_mut::<_object>();
+                }
+                if !pathname.is_null() {
+                    pathobj = PyUnicode_DecodeFSDefault(pathname);
+                    if pathobj.is_null() {
+                        break '__join_0;
+                    }
+                } else {
+                    if !cpathobj.is_null() {
+                        interp = _PyInterpreterState_GET();
+                        if interp.is_null() {
+                            Py_FatalError__23!(c"no current interpreter".as_ptr() as *mut i8);
+                        }
+                        external = PyObject_GetAttrString(
+                            IMPORTLIB!(interp),
+                            c"_bootstrap_external".as_ptr(),
+                        );
+                        if !external.is_null() {
+                            pathobj = PyObject_CallMethodOneArg(
+                                external,
+                                core::ptr::addr_of_mut!(
+                                    _PyRuntime
+                                        .static_objects
+                                        .singletons
+                                        .strings
+                                        .identifiers
+                                        ._py__get_sourcefile
+                                        ._ascii
+                                        .ob_base
+                                ),
+                                cpathobj,
+                            );
+                            Py_DECREF!(external);
+                        }
+                        if pathobj.is_null() {
+                            PyErr_Clear();
+                        }
+                    } else {
+                        pathobj = core::ptr::null_mut::<_object>();
+                    }
+                }
+                m = PyImport_ExecCodeModuleObject(nameobj, co, pathobj, cpathobj);
+            }
+            Py_DECREF!(nameobj);
+            Py_XDECREF!(pathobj);
+            Py_XDECREF!(cpathobj);
+            return m;
+        }
+    }
+}
+
+fn module_dict_for_exec(tstate: *mut _ts, name: *mut _object) -> *mut _object {
+    let m: *mut _object = import_add_module(tstate, name);
+    if m.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    // If the module is being reloaded, we get the old module back
+    // and re-use its dict to exec the new code.
+    let d: *mut _object = unsafe { PyModule_GetDict(m) };
+    let mut r: i32 = unsafe {
+        PyDict_Contains(
+            d,
+            core::ptr::addr_of_mut!(
+                _PyRuntime
+                    .static_objects
+                    .singletons
+                    .strings
+                    .identifiers
+                    ._py___builtins__
+                    ._ascii
+                    .ob_base
+            ),
+        )
+    };
+    if r == 0 {
+        r = unsafe {
+            PyDict_SetItem(
+                d,
+                core::ptr::addr_of_mut!(
+                    _PyRuntime
+                        .static_objects
+                        .singletons
+                        .strings
+                        .identifiers
+                        ._py___builtins__
+                        ._ascii
+                        .ob_base
+                ),
+                PyEval_GetBuiltins(),
+            )
+        };
+    }
+    if r < 0 {
+        remove_module(tstate, name);
+        Py_DECREF!(m);
+        return core::ptr::null_mut::<_object>();
+    }
+    Py_INCREF!(d);
+    Py_DECREF!(m);
+    d
+}
+
+fn exec_code_in_module(
+    tstate: *mut _ts,
+    name: *mut _object,
+    module_dict: *mut _object,
+    code_object: *mut _object,
+) -> *mut _object {
+    let v: *mut _object = unsafe { PyEval_EvalCode(code_object, module_dict, module_dict) };
+    if v.is_null() {
+        remove_module(tstate, name);
+        return core::ptr::null_mut::<_object>();
+    }
+    Py_DECREF!(v);
+    let m: *mut _object = import_get_module(tstate, name);
+    let __v0: bool = m.is_null() && _PyErr_Occurred(tstate).is_null();
+    if __v0 {
+        unsafe {
+            _PyErr_Format(
+                tstate,
+                PyExc_ImportError,
+                c"Loaded module %R not found in sys.modules".as_ptr(),
+                name,
+            )
+        };
+    }
+    m
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ExecCodeModuleObject(
+    name: *mut _object,
+    co: *mut _object,
+    mut pathname: *mut _object,
+    cpathname: *mut _object,
+) -> *mut _object {
+    let tstate: *mut _ts = _PyThreadState_GET();
+    let mut res: *mut _object = unsafe { core::mem::zeroed() };
+    let d: *mut _object = module_dict_for_exec(tstate, name);
+    if d.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    if pathname.is_null() {
+        pathname = unsafe { (*(co as *mut PyCodeObject)).co_filename };
+    }
+    let external: *mut _object = unsafe {
+        PyObject_GetAttrString(
+            IMPORTLIB!(unsafe { (*tstate).interp }),
+            c"_bootstrap_external".as_ptr(),
+        )
+    };
+    if external.is_null() {
+        Py_DECREF!(d);
+        return core::ptr::null_mut::<_object>();
+    }
+    res = unsafe {
+        PyObject_CallMethodObjArgs(
+            external,
+            core::ptr::addr_of_mut!(
+                _PyRuntime
+                    .static_objects
+                    .singletons
+                    .strings
+                    .identifiers
+                    ._py__fix_up_module
+                    ._ascii
+                    .ob_base
+            ),
+            d,
+            name,
+            pathname,
+            cpathname,
+            core::ptr::null_mut::<()>(),
+        )
+    };
+    Py_DECREF!(external);
+    if !res.is_null() {
+        Py_DECREF!(res);
+        res = exec_code_in_module(tstate, name, d, co);
+    }
+    Py_DECREF!(d);
+    res
+}
+
+fn update_code_filenames(co: *mut PyCodeObject, oldname: *mut _object, newname: *mut _object) {
+    let mut n: i64 = 0;
+    if (unsafe { PyUnicode_Compare((*co).co_filename, oldname) }) != 0 {
+        return;
+    }
+    Py_XSETREF!((*co).co_filename, Py_NewRef!(newname));
+    let constants: *mut _object = unsafe { (*co).co_consts };
+    n = PyTuple_GET_SIZE!(constants);
+    for i in 0..n {
+        let tmp: *mut _object = PyTuple_GET_ITEM!(constants, i);
+        if PyCode_Check!(tmp) != 0 {
+            update_code_filenames(tmp as *mut PyCodeObject, oldname, newname);
+        }
+    }
+}
+
+fn update_compiled_module(co: *mut PyCodeObject, newname: *mut _object) {
+    if (unsafe { PyUnicode_Compare((*co).co_filename, newname) }) == 0 {
+        return;
+    }
+    let oldname: *mut _object = unsafe { (*co).co_filename };
+    Py_INCREF!(oldname);
+    update_code_filenames(co, oldname, newname);
+    Py_DECREF!(oldname);
+}
+
+// frozen modules
+/// Return true if the name is an alias.  In that case, "alias" is set
+/// to the original module name.  If it is an alias but the original
+/// module isn't known then "alias" is set to NULL while true is returned.
+fn resolve_module_alias(
+    name: *const i8,
+    aliases: *const _module_alias,
+    alias: *mut *const i8,
+) -> bool {
+    let mut entry: *const _module_alias = unsafe { core::mem::zeroed() };
+    entry = aliases;
+    loop {
+        if unsafe { (*entry).name }.is_null() {
+            // It isn't an alias.
+            return false;
+        }
+        if (unsafe {
+            strcmp(
+                name as *const core::ffi::c_char,
+                (*entry).name as *const core::ffi::c_char,
+            ) as i32
+        }) == 0
+        {
+            if !alias.is_null() {
+                unsafe {
+                    *alias = (*entry).orig;
+                }
+            }
+            return true;
+        }
+        let __v1: *const _module_alias = entry;
+        entry = __v1.wrapping_offset(1 as isize);
+    }
+    unsafe { core::mem::zeroed() }
+}
+
+fn use_frozen() -> bool {
+    let interp: *mut _is = _PyInterpreterState_GET();
+    let r#override: i32 = OVERRIDE_FROZEN_MODULES!(interp);
+    if r#override > 0 {
+        return true;
+    } else {
+        if r#override < 0 {
+            return false;
+        } else {
+            return (unsafe { (*interp).config.use_frozen_modules }) != 0;
+        }
+    }
+}
+
+fn list_frozen_module_names() -> *mut _object {
+    let mut found: i32 = unsafe { core::mem::zeroed() };
+    let mut nameobj: *mut _object = unsafe { core::mem::zeroed() };
+    let mut nameobj_1: *mut _object = unsafe { core::mem::zeroed() };
+    let mut nameobj_2: *mut _object = unsafe { core::mem::zeroed() };
+    let mut nameobj_3: *mut _object = unsafe { core::mem::zeroed() };
+    let mut p: *const _frozen = unsafe { core::mem::zeroed() };
+    let mut enabled: bool = unsafe { core::mem::zeroed() };
+    let mut names: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        names = PyList_New(0i64);
+        if names.is_null() {
+            return core::ptr::null_mut::<_object>();
+        } else {
+            enabled = use_frozen();
+            // We always use the bootstrap modules.
+            p = _PyImport_FrozenBootstrap;
+            '__join_0: {
+                loop {
+                    if unsafe { (*p).name }.is_null() {
+                        break;
+                    } else {
+                        loop {
+                            nameobj_3 = PyUnicode_FromString((*p).name);
+                            if nameobj_3.is_null() {
+                                break '__join_0;
+                            } else {
+                                let res: i32 = PyList_Append(names, nameobj_3);
+                                Py_DECREF!(nameobj_3);
+                                if res != 0 {
+                                    break '__join_0;
+                                } else {
+                                    if true {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        let __v14: *const _frozen = p;
+                        p = __v14.wrapping_offset(1 as isize);
+                    }
+                }
+                // Frozen stdlib modules may be disabled.
+                p = _PyImport_FrozenStdlib;
+                loop {
+                    if unsafe { (*p).name }.is_null() {
+                        break;
+                    } else {
+                        if enabled {
+                            loop {
+                                nameobj_2 = PyUnicode_FromString((*p).name);
+                                if nameobj_2.is_null() {
+                                    break '__join_0;
+                                } else {
+                                    let res: i32 = PyList_Append(names, nameobj_2);
+                                    Py_DECREF!(nameobj_2);
+                                    if res != 0 {
+                                        break '__join_0;
+                                    } else {
+                                        if true {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let __v10: *const _frozen = p;
+                        p = __v10.wrapping_offset(1 as isize);
+                    }
+                }
+                p = _PyImport_FrozenTest;
+                loop {
+                    if unsafe { (*p).name }.is_null() {
+                        break;
+                    } else {
+                        if enabled {
+                            loop {
+                                nameobj_1 = PyUnicode_FromString((*p).name);
+                                if nameobj_1.is_null() {
+                                    break '__join_0;
+                                } else {
+                                    let res: i32 = PyList_Append(names, nameobj_1);
+                                    Py_DECREF!(nameobj_1);
+                                    if res != 0 {
+                                        break '__join_0;
+                                    } else {
+                                        if true {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let __v6: *const _frozen = p;
+                        p = __v6.wrapping_offset(1 as isize);
+                    }
+                }
+                '__join_1: {
+                    // Add any custom modules.
+                    if !unsafe { PyImport_FrozenModules }.is_null() {
+                        p = PyImport_FrozenModules;
+                        loop {
+                            if unsafe { (*p).name }.is_null() {
+                                break '__join_1;
+                            } else {
+                                nameobj = PyUnicode_FromString((*p).name);
+                                if nameobj.is_null() {
+                                    break '__join_0;
+                                } else {
+                                    found = PySequence_Contains(names, nameobj);
+                                    if found < 0 {
+                                        break;
+                                    } else {
+                                        if found != 0 {
+                                            Py_DECREF!(nameobj);
+                                        } else {
+                                            let res: i32 = PyList_Append(names, nameobj);
+                                            Py_DECREF!(nameobj);
+                                            if res != 0 {
+                                                break '__join_0;
+                                            }
+                                        }
+                                        let __v1: *const _frozen = p;
+                                        p = __v1.wrapping_offset(1 as isize);
+                                    }
+                                }
+                            }
+                        }
+                        Py_DECREF!(nameobj);
+                        break '__join_0;
+                    }
+                }
+                return names;
+            }
+            Py_DECREF!(names);
+            return core::ptr::null_mut::<_object>();
+        }
+    }
+}
+
+fn set_frozen_error(status: u32, modname: *mut _object) {
+    let mut err: *const i8 = core::ptr::null::<i8>();
+    '__slate_break_0: {
+        match status as u32 {
+            1 | 2 => {
+                err = c"No such frozen object named %R".as_ptr();
+            }
+            3 => {
+                err =
+                    c"Frozen modules are disabled and the frozen object named %R is not essential"
+                        .as_ptr();
+            }
+            4 => {
+                err = c"Excluded frozen object named %R".as_ptr();
+            }
+            5 => {
+                err = c"Frozen object named %R is invalid".as_ptr();
+            }
+            0 => {
+                break '__slate_break_0; // There was no error.
+            }
+            _ => {
+                Py_UNREACHABLE!();
+            }
+        }
+    }
+    if !err.is_null() {
+        let msg: *mut _object = unsafe { PyUnicode_FromFormat(err, modname) };
+        if msg.is_null() {
+            unsafe { PyErr_Clear() };
+        }
+        unsafe { PyErr_SetImportError(msg, modname, core::ptr::null_mut::<_object>()) };
+        Py_XDECREF!(msg);
+    }
+}
+
+fn look_up_frozen(name: *const i8) -> *const _frozen {
+    let mut p: *const _frozen = unsafe { core::mem::zeroed() };
+    // We always use the bootstrap modules.
+    p = unsafe { _PyImport_FrozenBootstrap };
+    loop {
+        if unsafe { (*p).name }.is_null() {
+            // We hit the end-of-list sentinel value.
+            break;
+        }
+        if (unsafe {
+            strcmp(
+                name as *const core::ffi::c_char,
+                (*p).name as *const core::ffi::c_char,
+            ) as i32
+        }) == 0
+        {
+            return p;
+        }
+        let __v1: *const _frozen = p;
+        p = __v1.wrapping_offset(1 as isize);
+    }
+    // Prefer custom modules, if any.  Frozen stdlib modules can be
+    //
+    // disabled here by setting "code" to NULL in the array entry.
+    if !unsafe { PyImport_FrozenModules }.is_null() {
+        p = unsafe { PyImport_FrozenModules };
+        while !unsafe { (*p).name }.is_null() {
+            if (unsafe {
+                strcmp(
+                    name as *const core::ffi::c_char,
+                    (*p).name as *const core::ffi::c_char,
+                ) as i32
+            }) == 0
+            {
+                return p;
+            }
+            let __v4: *const _frozen = p;
+            p = __v4.wrapping_offset(1 as isize);
+        }
+    }
+    // Frozen stdlib modules may be disabled.
+    if use_frozen() {
+        p = unsafe { _PyImport_FrozenStdlib };
+        while !unsafe { (*p).name }.is_null() {
+            if (unsafe {
+                strcmp(
+                    name as *const core::ffi::c_char,
+                    (*p).name as *const core::ffi::c_char,
+                ) as i32
+            }) == 0
+            {
+                return p;
+            }
+            let __v7: *const _frozen = p;
+            p = __v7.wrapping_offset(1 as isize);
+        }
+        p = unsafe { _PyImport_FrozenTest };
+        while !unsafe { (*p).name }.is_null() {
+            if (unsafe {
+                strcmp(
+                    name as *const core::ffi::c_char,
+                    (*p).name as *const core::ffi::c_char,
+                ) as i32
+            }) == 0
+            {
+                return p;
+            }
+            let __v10: *const _frozen = p;
+            p = __v10.wrapping_offset(1 as isize);
+        }
+    }
+    core::ptr::null::<_frozen>()
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct frozen_info {
+    nameobj: *mut _object,
+    data: *const i8,
+    size: i64,
+    is_package: bool,
+    is_alias: bool,
+    origname: *const i8,
+}
+
+fn find_frozen(nameobj: *mut _object, info: *mut frozen_info) -> u32 {
+    if !info.is_null() {
+        unsafe {
+            core::ptr::write_bytes(
+                ((info as *mut ()) as *mut core::ffi::c_void) as *mut u8,
+                (0i32 as i32) as u8,
+                ((core::mem::size_of::<frozen_info>() as u64) as usize) as usize,
+            )
+        };
+    }
+    if nameobj.is_null() || nameobj == unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) } {
+        return 1;
+    }
+    let name: *const i8 = unsafe { _PyUnicode_AsUTF8NoNUL(nameobj) };
+    if name.is_null() {
+        // Note that this function previously used
+        //
+        // _PyUnicode_EqualToASCIIString().  We clear the error here
+        //
+        // (instead of propagating it) to match the earlier behavior
+        //
+        // more closely.
+        unsafe { PyErr_Clear() };
+        return 1;
+    }
+    let p: *const _frozen = look_up_frozen(name);
+    if p.is_null() {
+        return 2;
+    }
+    if !info.is_null() {
+        unsafe {
+            (*info).nameobj = nameobj;
+        }
+        // borrowed
+        unsafe {
+            (*info).data = (*p).code as *const i8;
+        }
+        unsafe {
+            (*info).size = (*p).size as i64;
+        }
+        unsafe {
+            (*info).is_package = (*p).is_package != 0;
+        }
+        if (unsafe { (*p).size }) < 0 {
+            // backward compatibility with negative size values
+            unsafe {
+                (*info).size = unsafe { (*p).size }.wrapping_neg() as i64;
+            }
+            unsafe {
+                (*info).is_package = true;
+            }
+        }
+        unsafe {
+            (*info).origname = name;
+        }
+        unsafe {
+            (*info).is_alias = resolve_module_alias(
+                name,
+                _PyImport_FrozenAliases,
+                core::ptr::addr_of_mut!((*info).origname),
+            );
+        }
+    }
+    if unsafe { (*p).code }.is_null() {
+        // It is frozen but marked as un-importable.
+        return 4;
+    }
+    if ((unsafe { *unsafe { (*p).code }.wrapping_offset(0 as isize) }) as i32) == 0
+        || (unsafe { (*p).size }) == 0
+    {
+        // Does not contain executable code.
+        return 5;
+    }
+    0
+}
+
+fn unmarshal_frozen_code(interp: *mut _is, info: &frozen_info) -> *mut _object {
+    let co: *mut _object = unsafe {
+        PyMarshal_ReadObjectFromString(
+            (*(info as *const frozen_info)).data,
+            (*(info as *const frozen_info)).size,
+        )
+    };
+    if co.is_null() {
+        // Does not contain executable code.
+        unsafe { PyErr_Clear() };
+        set_frozen_error(5u32, unsafe { (*(info as *const frozen_info)).nameobj });
+        return core::ptr::null_mut::<_object>();
+    }
+    if PyCode_Check!(co) == 0 {
+        // We stick with TypeError for backward compatibility.
+        unsafe {
+            PyErr_Format(
+                PyExc_TypeError,
+                c"frozen object %R is not a code object".as_ptr(),
+                (*(info as *const frozen_info)).nameobj,
+            )
+        };
+        Py_DECREF!(co);
+        return core::ptr::null_mut::<_object>();
+    }
+    co
+}
+
+// Initialize a frozen module.
+// Return 1 for success, 0 if the module is not found, and -1 with
+// an exception set if the initialization failed.
+// This function is also used from frozenmain.c
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ImportFrozenModuleObject(name: *mut _object) -> i32 {
+    // Set __origname__ (consumed in FrozenImporter._setup_module()).
+    let mut origname: *mut _object = unsafe { core::mem::zeroed() };
+    // Set __path__ to the empty list
+    let mut l: *mut _object = unsafe { core::mem::zeroed() };
+    let mut status: u32 = unsafe { core::mem::zeroed() };
+    let mut info: core::mem::MaybeUninit<frozen_info> = core::mem::MaybeUninit::uninit();
+    let __slate_slot_3: *mut frozen_info = core::ptr::addr_of_mut!(info) as *mut frozen_info;
+    let mut err: i32 = unsafe { core::mem::zeroed() };
+    let mut d: *mut _object = unsafe { core::mem::zeroed() };
+    let mut m: *mut _object = unsafe { core::mem::zeroed() };
+    let mut co: *mut _object = unsafe { core::mem::zeroed() };
+    let mut tstate: *mut _ts = unsafe { core::mem::zeroed() };
+    unsafe {
+        tstate = _PyThreadState_GET();
+        d = core::ptr::null_mut::<_object>();
+        status = find_frozen(name, core::ptr::addr_of_mut!(*__slate_slot_3));
+        if (status as u32) == 2 || (status as u32) == 3 {
+            return 0;
+        } else {
+            if (status as u32) == 1 {
+                return 0;
+            } else {
+                if (status as u32) != 0 {
+                    set_frozen_error(status, name);
+                    return 1i32.wrapping_neg();
+                } else {
+                    co = unmarshal_frozen_code(
+                        (*tstate).interp,
+                        &(*core::ptr::addr_of_mut!(*__slate_slot_3)),
+                    );
+                    if co.is_null() {
+                        return 1i32.wrapping_neg();
+                    } else {
+                        '__join_0: {
+                            if (*__slate_slot_3).is_package {
+                                m = import_add_module(tstate, name);
+                                if m.is_null() {
+                                    break '__join_0;
+                                } else {
+                                    d = PyModule_GetDict(m);
+                                    l = PyList_New(0i64);
+                                    if l.is_null() {
+                                        Py_DECREF!(m);
+                                        break '__join_0;
+                                    } else {
+                                        err = PyDict_SetItemString(d, c"__path__".as_ptr(), l);
+                                        Py_DECREF!(l);
+                                        Py_DECREF!(m);
+                                        if err != 0 {
+                                            break '__join_0;
+                                        }
+                                    }
+                                }
+                            }
+                            d = module_dict_for_exec(tstate, name);
+                            if !d.is_null() {
+                                m = exec_code_in_module(tstate, name, d, co);
+                                if !m.is_null() {
+                                    Py_DECREF!(m);
+                                    if !(*__slate_slot_3).origname.is_null() {
+                                        origname = PyUnicode_FromString((*__slate_slot_3).origname);
+                                        if origname.is_null() {
+                                            break '__join_0;
+                                        }
+                                    } else {
+                                        origname =
+                                            Py_NewRef!(core::ptr::addr_of_mut!(_Py_NoneStruct));
+                                    }
+                                    err =
+                                        PyDict_SetItemString(d, c"__origname__".as_ptr(), origname);
+                                    Py_DECREF!(origname);
+                                    if err == 0 {
+                                        Py_DECREF!(d);
+                                        Py_DECREF!(co);
+                                        return 1;
+                                    }
+                                }
+                            }
+                        }
+                        Py_XDECREF!(d);
+                        Py_DECREF!(co);
+                        return 1i32.wrapping_neg();
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ImportFrozenModule(name: *const i8) -> i32 {
+    let mut ret: i32 = 0;
+    let nameobj: *mut _object = unsafe { PyUnicode_InternFromString(name) };
+    if nameobj.is_null() {
+        return 1i32.wrapping_neg();
+    }
+    ret = PyImport_ImportFrozenModuleObject(nameobj);
+    Py_DECREF!(nameobj);
+    ret
+}
+
+// importlib
+/// Import the _imp extension by calling manually _imp.create_builtin() and
+/// _imp.exec_builtin() since importlib is not initialized yet. Initializing
+/// importlib requires the _imp module: this function fix the bootstrap issue.
+fn bootstrap_imp(tstate: *mut _ts) -> *mut _object {
+    // Create the _imp module from its definition.
+    let mut r#mod: *mut _object = unsafe { core::mem::zeroed() };
+    let mut spec: *mut _object = unsafe { core::mem::zeroed() };
+    // Mock a ModuleSpec object just good enough for PyModule_FromDefAndSpec():
+    //
+    // an object with just a name attribute.
+    //
+    //
+    //
+    // _imp.__spec__ is overridden by importlib._bootstrap._instal() anyway.
+    let mut attrs: *mut _object = unsafe { core::mem::zeroed() };
+    let mut name: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        name = PyUnicode_FromString(c"_imp".as_ptr());
+        if name.is_null() {
+            return core::ptr::null_mut::<_object>();
+        } else {
+            attrs = Py_BuildValue(c"{sO}".as_ptr(), c"name".as_ptr() as *mut i8, name);
+            if !attrs.is_null() {
+                spec = _PyNamespace_New(attrs);
+                Py_DECREF!(attrs);
+                if !spec.is_null() {
+                    r#mod = create_builtin(tstate, name, spec);
+                    Py_CLEAR__2!(name);
+                    Py_DECREF!(spec);
+                    if !r#mod.is_null() {
+                        // not found
+                        // Execute the _imp module: call imp_module_exec().
+                        if exec_builtin_or_dynamic(r#mod) < 0 {
+                            Py_DECREF!(r#mod);
+                        } else {
+                            return r#mod;
+                        }
+                    }
+                }
+            }
+            Py_XDECREF!(name);
+            return core::ptr::null_mut::<_object>();
+        }
+    }
+}
+
+/// Global initializations.  Can be undone by Py_FinalizeEx().  Don't
+/// call this twice without an intervening Py_FinalizeEx() call.  When
+/// initializations fail, a fatal error is issued and the function does
+/// not return.  On return, the first thread and interpreter state have
+/// been created.
+///
+/// Locking: you must hold the interpreter lock while calling this.
+/// (If the lock has not yet been initialized, that's equivalent to
+/// having the lock, but you cannot use multiple threads.)
+fn init_importlib(tstate: *mut _ts, sysmod: *mut _object) -> i32 {
+    let interp: *mut _is = unsafe { (*tstate).interp };
+    let verbose: i32 = unsafe { (*_PyInterpreterState_GetConfig(interp)).verbose };
+    // Import _importlib through its frozen version, _frozen_importlib.
+    if verbose != 0 {
+        unsafe { PySys_FormatStderr(c"import _frozen_importlib # frozen\n".as_ptr()) };
+    }
+    if PyImport_ImportFrozenModule(c"_frozen_importlib".as_ptr()) <= 0 {
+        return 1i32.wrapping_neg();
+    }
+    let importlib: *mut _object = PyImport_AddModuleRef(c"_frozen_importlib".as_ptr());
+    if importlib.is_null() {
+        return 1i32.wrapping_neg();
+    }
+    unsafe {
+        (*interp).imports.importlib = importlib;
+    }
+    // Import the _imp module
+    if verbose != 0 {
+        unsafe { PySys_FormatStderr(c"import _imp # builtin\n".as_ptr()) };
+    }
+    let imp_mod: *mut _object = bootstrap_imp(tstate);
+    if imp_mod.is_null() {
+        return 1i32.wrapping_neg();
+    }
+    if _PyImport_SetModuleString(c"_imp".as_ptr(), imp_mod) < 0 {
+        Py_DECREF!(imp_mod);
+        return 1i32.wrapping_neg();
+    }
+    // Install importlib as the implementation of import
+    let value: *mut _object = unsafe {
+        PyObject_CallMethod(
+            importlib,
+            c"_install".as_ptr(),
+            c"OO".as_ptr(),
+            sysmod,
+            imp_mod,
+        )
+    };
+    Py_DECREF!(imp_mod);
+    if value.is_null() {
+        return 1i32.wrapping_neg();
+    }
+    Py_DECREF!(value);
+    0
+}
+
+fn init_importlib_external(interp: *mut _is) -> i32 {
+    let value: *mut _object = unsafe {
+        PyObject_CallMethod(
+            IMPORTLIB!(interp),
+            c"_install_external_importers".as_ptr(),
+            c"".as_ptr(),
+        )
+    };
+    if value.is_null() {
+        return 1i32.wrapping_neg();
+    }
+    Py_DECREF!(value);
+    0
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_GetImportlibLoader(
+    interp: *mut _is,
+    loader_name: *const i8,
+) -> *mut _object {
+    unsafe { PyObject_GetAttrString(IMPORTLIB!(interp), loader_name) }
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_GetImportlibExternalLoader(
+    interp: *mut _is,
+    loader_name: *const i8,
+) -> *mut _object {
+    let bootstrap: *mut _object =
+        unsafe { PyObject_GetAttrString(IMPORTLIB!(interp), c"_bootstrap_external".as_ptr()) };
+    if bootstrap.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let loader_type: *mut _object = unsafe { PyObject_GetAttrString(bootstrap, loader_name) };
+    Py_DECREF!(bootstrap);
+    loader_type
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_BlessMyLoader(
+    interp: *mut _is,
+    module_globals: *mut _object,
+) -> *mut _object {
+    let external: *mut _object =
+        unsafe { PyObject_GetAttrString(IMPORTLIB!(interp), c"_bootstrap_external".as_ptr()) };
+    if external.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let loader: *mut _object = unsafe {
+        PyObject_CallMethod(
+            external,
+            c"_bless_my_loader".as_ptr(),
+            c"O".as_ptr(),
+            module_globals,
+            core::ptr::null_mut::<()>(),
+        )
+    };
+    Py_DECREF!(external);
+    loader
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_ImportlibModuleRepr(
+    interp: *mut _is,
+    m: *mut _object,
+) -> *mut _object {
+    unsafe {
+        PyObject_CallMethod(
+            IMPORTLIB!(interp),
+            c"_module_repr".as_ptr(),
+            c"O".as_ptr(),
+            m,
+        )
+    }
+}
+
+// Return a finder object for a sys.path/pkg.__path__ item 'p',
+// possibly by fetching it from the path_importer_cache dict. If it
+// wasn't yet cached, traverse path_hooks until a hook is found
+// that can handle the path item. Return None if no hook could;
+// this tells our caller that the path based finder could not find
+// a finder for this path item. Cache the result in
+// path_importer_cache.
+fn get_path_importer(
+    tstate: *mut _ts,
+    path_importer_cache: *mut _object,
+    path_hooks: *mut _object,
+    p: *mut _object,
+) -> *mut _object {
+    let mut importer: *mut _object = unsafe { core::mem::zeroed() };
+    let mut nhooks: i64 = 0;
+    if PyList_Check!(path_hooks) == 0 {
+        unsafe { PyErr_SetString(PyExc_RuntimeError, c"sys.path_hooks is not a list".as_ptr()) };
+        return core::ptr::null_mut::<_object>();
+    }
+    if PyDict_Check!(path_importer_cache) == 0 {
+        unsafe {
+            PyErr_SetString(
+                PyExc_RuntimeError,
+                c"sys.path_importer_cache is not a dict".as_ptr(),
+            )
+        };
+        return core::ptr::null_mut::<_object>();
+    }
+    nhooks = unsafe { PyList_Size(path_hooks) };
+    if nhooks < 0 {
+        return core::ptr::null_mut::<_object>();
+    }
+    // Shouldn't happen
+    if (unsafe { PyDict_GetItemRef(path_importer_cache, p, core::ptr::addr_of_mut!(importer)) })
+        != 0
+    {
+        // found or error
+        return importer;
+    }
+    // not found
+    //
+    // set path_importer_cache[p] to None to avoid recursion
+    if (unsafe {
+        PyDict_SetItem(
+            path_importer_cache,
+            p,
+            core::ptr::addr_of_mut!(_Py_NoneStruct),
+        )
+    }) != 0
+    {
+        return core::ptr::null_mut::<_object>();
+    }
+    for j in 0..nhooks {
+        let hook: *mut _object = unsafe { PyList_GetItem(path_hooks, j) };
+        if hook.is_null() {
+            return core::ptr::null_mut::<_object>();
+        }
+        importer = unsafe { PyObject_CallOneArg(hook, p) };
+        if !importer.is_null() {
+            break;
+        }
+        if (unsafe { _PyErr_ExceptionMatches(tstate, PyExc_ImportError) }) == 0 {
+            return core::ptr::null_mut::<_object>();
+        }
+        unsafe { _PyErr_Clear(tstate) };
+    }
+    if importer.is_null() {
+        return unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) };
+    }
+    if (unsafe { PyDict_SetItem(path_importer_cache, p, importer) }) < 0 {
+        Py_DECREF!(importer);
+        return core::ptr::null_mut::<_object>();
+    }
+    importer
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_GetImporter(path: *mut _object) -> *mut _object {
+    let tstate: *mut _ts = _PyThreadState_GET();
+    let path_importer_cache: *mut _object =
+        unsafe { _PySys_GetRequiredAttrString(c"path_importer_cache".as_ptr()) };
+    if path_importer_cache.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let path_hooks: *mut _object = unsafe { _PySys_GetRequiredAttrString(c"path_hooks".as_ptr()) };
+    if path_hooks.is_null() {
+        Py_DECREF!(path_importer_cache);
+        return core::ptr::null_mut::<_object>();
+    }
+    let importer: *mut _object = get_path_importer(tstate, path_importer_cache, path_hooks, path);
+    Py_DECREF!(path_hooks);
+    Py_DECREF!(path_importer_cache);
+    importer
+}
+
+// importing modules
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_InitDefaultImportFunc(interp: *mut _is) -> i32 {
+    // Get the __import__ function
+    let mut import_func: *mut _object = unsafe { core::mem::zeroed() };
+    if (unsafe {
+        PyDict_GetItemStringRef(
+            (*interp).builtins,
+            c"__import__".as_ptr(),
+            core::ptr::addr_of_mut!(import_func),
+        )
+    }) <= 0
+    {
+        return 1i32.wrapping_neg();
+    }
+    unsafe {
+        (*interp).imports.import_func = import_func;
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_IsDefaultImportFunc(interp: *mut _is, func: *mut _object) -> i32 {
+    (func == IMPORT_FUNC!(interp)) as i32
+}
+
+// Import a module, either built-in, frozen, or external, and return
+// its module object WITH INCREMENTED REFERENCE COUNT
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ImportModule(name: *const i8) -> *mut _object {
+    let pname: *mut _object = unsafe { PyUnicode_FromString(name) };
+    if pname.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let result: *mut _object = PyImport_Import(pname);
+    Py_DECREF!(pname);
+    result
+}
+
+/// Import a module without blocking
+///
+/// At first it tries to fetch the module from sys.modules. If the module was
+/// never loaded before it loads it with PyImport_ImportModule() unless another
+/// thread holds the import lock. In the latter case the function raises an
+/// ImportError instead of blocking.
+///
+/// Returns the module object with incremented ref count.
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ImportModuleNoBlock(name: *const i8) -> *mut _object {
+    if (unsafe {
+        PyErr_WarnEx(PyExc_DeprecationWarning, c"PyImport_ImportModuleNoBlock() is deprecated and scheduled for removal in Python 3.15. Use PyImport_ImportModule() instead.".as_ptr(), 1i64)
+    }) != 0
+    {
+        return core::ptr::null_mut::<_object>();
+    }
+    PyImport_ImportModule(name)
+}
+
+/// Remove importlib frames from the traceback,
+/// except in Verbose mode.
+fn remove_importlib_frames(tstate: *mut _ts) {
+    let mut __v0: bool = unsafe { core::mem::zeroed() };
+    let mut __v1: bool = unsafe { core::mem::zeroed() };
+    let mut __v2: bool = unsafe { core::mem::zeroed() };
+    let mut now_in_importlib: i32 = unsafe { core::mem::zeroed() };
+    let mut code: *mut PyCodeObject = unsafe { core::mem::zeroed() };
+    let mut next: *mut _object = unsafe { core::mem::zeroed() };
+    let mut traceback: *mut _traceback = unsafe { core::mem::zeroed() };
+    let mut tb: *mut _object = unsafe { core::mem::zeroed() };
+    let mut __v9: bool = unsafe { core::mem::zeroed() };
+    let mut exc: *mut _object = unsafe { core::mem::zeroed() };
+    let mut base_tb: *mut _object = unsafe { core::mem::zeroed() };
+    let mut outer_link: *mut *mut _object = unsafe { core::mem::zeroed() };
+    let mut prev_link: *mut *mut _object = unsafe { core::mem::zeroed() };
+    let mut in_importlib: i32 = unsafe { core::mem::zeroed() };
+    let mut always_trim: i32 = unsafe { core::mem::zeroed() };
+    let mut remove_frames: *const i8 = unsafe { core::mem::zeroed() };
+    let mut external_filename: *const i8 = unsafe { core::mem::zeroed() };
+    let mut importlib_filename: *const i8 = unsafe { core::mem::zeroed() };
+    unsafe {
+        importlib_filename = c"<frozen importlib._bootstrap>".as_ptr();
+        external_filename = c"<frozen importlib._bootstrap_external>".as_ptr();
+        remove_frames = c"_call_with_frames_removed".as_ptr();
+        always_trim = 0;
+        in_importlib = 0;
+        outer_link = core::ptr::null_mut::<*mut _object>();
+        base_tb = core::ptr::null_mut::<_object>();
+        // Synopsis: if it's an ImportError, we trim all importlib chunks
+        // from the traceback. We always trim chunks
+        // which end with a call to "_call_with_frames_removed".
+        exc = _PyErr_GetRaisedException(tstate);
+        if exc.is_null() {
+            __v9 = true;
+        } else {
+            __v9 = (*_PyInterpreterState_GetConfig((*tstate).interp)).verbose != 0;
+        }
+        if !__v9 {
+            if PyType_IsSubtype(Py_TYPE!(exc), PyExc_ImportError as *mut _typeobject) != 0 {
+                always_trim = 1;
+            }
+            base_tb = PyException_GetTraceback(exc);
+            prev_link = core::ptr::addr_of_mut!(base_tb);
+            tb = base_tb;
+            while !tb.is_null() {
+                traceback = tb as *mut _traceback;
+                next = (*traceback).tb_next as *mut _object;
+                let frame: *mut _frame = (*traceback).tb_frame;
+                code = PyFrame_GetCode(frame);
+                if _PyUnicode_EqualToASCIIString((*code).co_filename, importlib_filename) != 0 {
+                    __v2 = true;
+                } else {
+                    __v2 =
+                        _PyUnicode_EqualToASCIIString((*code).co_filename, external_filename) != 0;
+                }
+                now_in_importlib = __v2 as i32;
+                if now_in_importlib != 0 && in_importlib == 0 {
+                    // This is the link to this chunk of importlib tracebacks
+                    outer_link = prev_link;
+                }
+                in_importlib = now_in_importlib;
+                if in_importlib != 0 {
+                    if always_trim != 0 {
+                        __v0 = true;
+                    } else {
+                        __v0 = _PyUnicode_EqualToASCIIString((*code).co_name, remove_frames) != 0;
+                    }
+                    __v1 = __v0;
+                } else {
+                    __v1 = false;
+                }
+                if __v1 {
+                    Py_XSETREF!(*outer_link, Py_XNewRef!(next));
+                    prev_link = outer_link;
+                } else {
+                    prev_link = core::ptr::addr_of_mut!((*traceback).tb_next) as *mut *mut _object;
+                }
+                Py_DECREF__2!(code);
+                tb = next;
+            }
+            if base_tb.is_null() {
+                base_tb = core::ptr::addr_of_mut!(_Py_NoneStruct);
+                Py_INCREF!(core::ptr::addr_of_mut!(_Py_NoneStruct));
+            }
+            PyException_SetTraceback(exc, base_tb);
+        }
+        Py_XDECREF!(base_tb);
+        _PyErr_SetRaisedException(tstate, exc);
+    }
+}
+
+fn resolve_name(
+    tstate: *mut _ts,
+    name: *mut _object,
+    globals: *mut _object,
+    level: i32,
+) -> *mut _object {
+    let mut __v0: bool = unsafe { core::mem::zeroed() };
+    let mut parent: *mut _object = unsafe { core::mem::zeroed() };
+    let mut equal: i32 = unsafe { core::mem::zeroed() };
+    let mut substr: *mut _object = unsafe { core::mem::zeroed() };
+    let mut dot: i64 = unsafe { core::mem::zeroed() };
+    let mut haspath: i32 = unsafe { core::mem::zeroed() };
+    let mut level_up: i32 = unsafe { core::mem::zeroed() };
+    let mut base: *mut _object = unsafe { core::mem::zeroed() };
+    let mut last_dot: i64 = unsafe { core::mem::zeroed() };
+    let mut spec: *mut _object = unsafe { core::mem::zeroed() };
+    let mut package: *mut _object = unsafe { core::mem::zeroed() };
+    unsafe {
+        '__join_0: {
+            package = core::ptr::null_mut::<_object>();
+            spec = core::ptr::null_mut::<_object>();
+            if globals.is_null() {
+                _PyErr_SetString(
+                    tstate,
+                    PyExc_KeyError,
+                    c"'__name__' not in globals".as_ptr(),
+                );
+            } else {
+                if PyDict_Check!(globals) == 0 {
+                    _PyErr_SetString(tstate, PyExc_TypeError, c"globals must be a dict".as_ptr());
+                } else {
+                    if PyDict_GetItemRef(
+                        globals,
+                        core::ptr::addr_of_mut!(
+                            _PyRuntime
+                                .static_objects
+                                .singletons
+                                .strings
+                                .identifiers
+                                ._py___package__
+                                ._ascii
+                                .ob_base
+                        ),
+                        core::ptr::addr_of_mut!(package),
+                    ) >= 0
+                    {
+                        if package == core::ptr::addr_of_mut!(_Py_NoneStruct) {
+                            Py_DECREF!(package);
+                            package = core::ptr::null_mut::<_object>();
+                        }
+                        if PyDict_GetItemRef(
+                            globals,
+                            core::ptr::addr_of_mut!(
+                                _PyRuntime
+                                    .static_objects
+                                    .singletons
+                                    .strings
+                                    .identifiers
+                                    ._py___spec__
+                                    ._ascii
+                                    .ob_base
+                            ),
+                            core::ptr::addr_of_mut!(spec),
+                        ) >= 0
+                        {
+                            '__join_1: {
+                                if !package.is_null() {
+                                    if PyUnicode_Check!(package) == 0 {
+                                        _PyErr_SetString(
+                                            tstate,
+                                            PyExc_TypeError,
+                                            c"package must be a string".as_ptr(),
+                                        );
+                                        break '__join_0;
+                                    } else {
+                                        if !spec.is_null()
+                                            && spec != core::ptr::addr_of_mut!(_Py_NoneStruct)
+                                        {
+                                            parent = PyObject_GetAttr(
+                                                spec,
+                                                core::ptr::addr_of_mut!(
+                                                    _PyRuntime
+                                                        .static_objects
+                                                        .singletons
+                                                        .strings
+                                                        .identifiers
+                                                        ._py_parent
+                                                        ._ascii
+                                                        .ob_base
+                                                ),
+                                            );
+                                            if parent.is_null() {
+                                                break '__join_0;
+                                            } else {
+                                                equal =
+                                                    PyObject_RichCompareBool(package, parent, 2i32);
+                                                Py_DECREF!(parent);
+                                                if equal < 0 {
+                                                    break '__join_0;
+                                                } else {
+                                                    if equal == 0 {
+                                                        if PyErr_WarnEx(
+                                                            PyExc_DeprecationWarning,
+                                                            c"__package__ != __spec__.parent"
+                                                                .as_ptr(),
+                                                            1i64,
+                                                        ) < 0
+                                                        {
+                                                            break '__join_0;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    if !spec.is_null()
+                                        && spec != core::ptr::addr_of_mut!(_Py_NoneStruct)
+                                    {
+                                        package = PyObject_GetAttr(
+                                            spec,
+                                            core::ptr::addr_of_mut!(
+                                                _PyRuntime
+                                                    .static_objects
+                                                    .singletons
+                                                    .strings
+                                                    .identifiers
+                                                    ._py_parent
+                                                    ._ascii
+                                                    .ob_base
+                                            ),
+                                        );
+                                        if package.is_null() {
+                                            break '__join_0;
+                                        } else {
+                                            if PyUnicode_Check!(package) == 0 {
+                                                _PyErr_SetString(
+                                                    tstate,
+                                                    PyExc_TypeError,
+                                                    c"__spec__.parent must be a string".as_ptr(),
+                                                );
+                                                break '__join_0;
+                                            }
+                                        }
+                                    } else {
+                                        if PyErr_WarnEx(PyExc_ImportWarning, c"can't resolve package from __spec__ or __package__, falling back on __name__ and __path__".as_ptr(), 1i64) < 0 {
+break '__join_0;
+} else {
+if PyDict_GetItemRef(globals, core::ptr::addr_of_mut!(_PyRuntime.static_objects.singletons.strings.identifiers._py___name__._ascii.ob_base), core::ptr::addr_of_mut!(package)) < 0 {
+break '__join_0;
+} else {
+if package.is_null() {
+_PyErr_SetString(tstate, PyExc_KeyError, c"'__name__' not in globals".as_ptr());
+break '__join_0;
+} else {
+if PyUnicode_Check!(package) == 0 {
+_PyErr_SetString(tstate, PyExc_TypeError, c"__name__ must be a string".as_ptr());
+break '__join_0;
+} else {
+haspath = PyDict_Contains(globals, core::ptr::addr_of_mut!(_PyRuntime.static_objects.singletons.strings.identifiers._py___path__._ascii.ob_base));
+if haspath < 0 {
+break '__join_0;
+} else {
+if haspath == 0 {
+dot = PyUnicode_FindChar(package, 46u32, 0i64, PyUnicode_GET_LENGTH!(package), 1i32.wrapping_neg());
+if dot == (2i32.wrapping_neg() as i64) {
+break '__join_0;
+} else {
+if dot == (1i32.wrapping_neg() as i64) {
+break '__join_1;
+} else {
+substr = PyUnicode_Substring(package, 0i64, dot);
+if substr.is_null() {
+break '__join_0;
+} else {
+Py_SETREF!(package, substr);
+}
+}
+}
+}
+}
+}
+}
+}
+}
+                                    }
+                                }
+                                last_dot = PyUnicode_GET_LENGTH!(package);
+                                if last_dot != 0 {
+                                    level_up = 1;
+                                    '__join_10: {
+                                        while level_up < level {
+                                            last_dot = PyUnicode_FindChar(
+                                                package,
+                                                46u32,
+                                                0i64,
+                                                last_dot,
+                                                1i32.wrapping_neg(),
+                                            );
+                                            if last_dot == (2i32.wrapping_neg() as i64) {
+                                                break '__join_0;
+                                            } else {
+                                                if last_dot == (1i32.wrapping_neg() as i64) {
+                                                    break '__join_10;
+                                                } else {
+                                                    level_up = level_up.wrapping_add(1);
+                                                }
+                                            }
+                                        }
+                                        Py_XDECREF!(spec);
+                                        base = PyUnicode_Substring(package, 0i64, last_dot);
+                                        Py_DECREF!(package);
+                                        if base.is_null() {
+                                            __v0 = true;
+                                        } else {
+                                            __v0 = PyUnicode_GET_LENGTH!(name) == 0;
+                                        }
+                                        if __v0 {
+                                            return base;
+                                        } else {
+                                            let abs_name: *mut _object =
+                                                PyUnicode_FromFormat(c"%U.%U".as_ptr(), base, name);
+                                            Py_DECREF!(base);
+                                            return abs_name;
+                                        }
+                                    }
+                                    _PyErr_SetString(
+                                        tstate,
+                                        PyExc_ImportError,
+                                        c"attempted relative import beyond top-level package"
+                                            .as_ptr(),
+                                    );
+                                    break '__join_0;
+                                }
+                            }
+                            _PyErr_SetString(
+                                tstate,
+                                PyExc_ImportError,
+                                c"attempted relative import with no known parent package".as_ptr(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        Py_XDECREF!(spec);
+        Py_XDECREF!(package);
+        return core::ptr::null_mut::<_object>();
+    }
+}
+
+fn import_find_and_load(tstate: *mut _ts, abs_name: *mut _object) -> *mut _object {
+    let mut r#mod: *mut _object = core::ptr::null_mut::<_object>();
+    let interp: *mut _is = unsafe { (*tstate).interp };
+    let import_time: i32 = unsafe { (*_PyInterpreterState_GetConfig(interp)).import_time };
+    let mut t1: i64 = 0;
+    let accumulated_copy: i64 = unsafe { (*interp).imports.find_and_load.accumulated };
+    let mut sys_path: *mut _object = unsafe { core::mem::zeroed() };
+    let mut sys_meta_path: *mut _object = unsafe { core::mem::zeroed() };
+    let mut sys_path_hooks: *mut _object = unsafe { core::mem::zeroed() };
+    if (unsafe {
+        _PySys_GetOptionalAttrString(c"path".as_ptr(), core::ptr::addr_of_mut!(sys_path))
+    }) < 0
+    {
+        return core::ptr::null_mut::<_object>();
+    }
+    if (unsafe {
+        _PySys_GetOptionalAttrString(
+            c"meta_path".as_ptr(),
+            core::ptr::addr_of_mut!(sys_meta_path),
+        )
+    }) < 0
+    {
+        Py_XDECREF!(sys_path);
+        return core::ptr::null_mut::<_object>();
+    }
+    if (unsafe {
+        _PySys_GetOptionalAttrString(
+            c"path_hooks".as_ptr(),
+            core::ptr::addr_of_mut!(sys_path_hooks),
+        )
+    }) < 0
+    {
+        Py_XDECREF!(sys_meta_path);
+        Py_XDECREF!(sys_path);
+        return core::ptr::null_mut::<_object>();
+    }
+    if (unsafe {
+        _PySys_Audit(
+            tstate,
+            c"import".as_ptr(),
+            c"OOOOO".as_ptr(),
+            abs_name,
+            core::ptr::addr_of_mut!(_Py_NoneStruct),
+            if !sys_path.is_null() {
+                sys_path
+            } else {
+                core::ptr::addr_of_mut!(_Py_NoneStruct)
+            },
+            if !sys_meta_path.is_null() {
+                sys_meta_path
+            } else {
+                core::ptr::addr_of_mut!(_Py_NoneStruct)
+            },
+            if !sys_path_hooks.is_null() {
+                sys_path_hooks
+            } else {
+                core::ptr::addr_of_mut!(_Py_NoneStruct)
+            },
+        )
+    }) < 0
+    {
+        Py_XDECREF!(sys_path_hooks);
+        Py_XDECREF!(sys_meta_path);
+        Py_XDECREF!(sys_path);
+        return core::ptr::null_mut::<_object>();
+    }
+    Py_XDECREF!(sys_path_hooks);
+    Py_XDECREF!(sys_meta_path);
+    Py_XDECREF!(sys_path);
+    // XOptions is initialized after first some imports.
+    // So we can't have negative cache before completed initialization.
+    // Anyway, importlib._find_and_load is much slower than
+    // _PyDict_GetItemIdWithError().
+    if import_time != 0 {
+        _IMPORT_TIME_HEADER!(interp);
+        let __v2: i32 = unsafe { (*interp).imports.find_and_load.import_level };
+        unsafe {
+            (*interp).imports.find_and_load.import_level = __v2.wrapping_add(1);
+        }
+        // ignore error: don't block import if reading the clock fails
+        unsafe { PyTime_PerfCounterRaw(core::ptr::addr_of_mut!(t1)) };
+        unsafe {
+            (*interp).imports.find_and_load.accumulated = 0;
+        }
+    }
+    if PyDTrace_IMPORT_FIND_LOAD_START_ENABLED() != 0 {
+        PyDTrace_IMPORT_FIND_LOAD_START(unsafe { PyUnicode_AsUTF8(abs_name) });
+    }
+    r#mod = unsafe {
+        PyObject_CallMethodObjArgs(
+            IMPORTLIB!(interp),
+            core::ptr::addr_of_mut!(
+                _PyRuntime
+                    .static_objects
+                    .singletons
+                    .strings
+                    .identifiers
+                    ._py__find_and_load
+                    ._ascii
+                    .ob_base
+            ),
+            abs_name,
+            IMPORT_FUNC!(interp),
+            core::ptr::null_mut::<()>(),
+        )
+    };
+    if PyDTrace_IMPORT_FIND_LOAD_DONE_ENABLED() != 0 {
+        PyDTrace_IMPORT_FIND_LOAD_DONE(
+            unsafe { PyUnicode_AsUTF8(abs_name) },
+            !r#mod.is_null() as i32,
+        );
+    }
+    if import_time != 0 {
+        let mut t2: i64 = 0;
+        unsafe { PyTime_PerfCounterRaw(core::ptr::addr_of_mut!(t2)) };
+        let cum: i64 = t2.wrapping_sub(t1);
+        let __v5: i32 = unsafe { (*interp).imports.find_and_load.import_level };
+        unsafe {
+            (*interp).imports.find_and_load.import_level = __v5.wrapping_sub(1);
+        }
+        let encoded_name: *mut _object = get_importtime_name(abs_name);
+        let __v7: *mut i8 = if !encoded_name.is_null() {
+            PyBytes_AS_STRING!(encoded_name)
+        } else {
+            c"?".as_ptr() as *mut i8
+        };
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        unsafe {
+            slate_support::fprintf(
+                slate_support::stderr(),
+                c"import time: %9ld | %10ld | %*s%s\n".as_ptr(),
+                _PyTime_AsMicroseconds(
+                    cum.wrapping_sub((*interp).imports.find_and_load.accumulated),
+                    1u32,
+                ),
+                _PyTime_AsMicroseconds(cum, 1u32),
+                unsafe { (*interp).imports.find_and_load.import_level }.wrapping_mul(2),
+                c"".as_ptr() as *mut i8,
+                __v7,
+            )
+        };
+        unsafe { fflush(core::ptr::null_mut()) };
+        Py_XDECREF!(encoded_name);
+        unsafe {
+            (*interp).imports.find_and_load.accumulated = accumulated_copy.wrapping_add(cum);
+        }
+    }
+    r#mod
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ImportModuleLevelObject(
+    name: *mut _object,
+    globals: *mut _object,
+    locals: *mut _object,
+    fromlist: *mut _object,
+    level: i32,
+) -> *mut _object {
+    let mut front: *mut _object = unsafe { core::mem::zeroed() };
+    let mut to_return: *mut _object = unsafe { core::mem::zeroed() };
+    let mut dot: i64 = unsafe { core::mem::zeroed() };
+    let mut len: i64 = unsafe { core::mem::zeroed() };
+    let mut has_path: i32 = unsafe { core::mem::zeroed() };
+    // Verify the module is still in sys.modules. Another thread may have
+    // removed it (due to import failure) between our import_get_module()
+    // call and the _initializing check in import_ensure_initialized().
+    // If removed, we retry the import to preserve normal semantics: the
+    // caller gets the exception from the actual import failure rather
+    // than a synthetic error.
+    let mut mod_check: *mut _object = unsafe { core::mem::zeroed() };
+    let mut __v8: bool = unsafe { core::mem::zeroed() };
+    let mut has_from: i32 = unsafe { core::mem::zeroed() };
+    let mut interp: *mut _is = unsafe { core::mem::zeroed() };
+    let mut package: *mut _object = unsafe { core::mem::zeroed() };
+    let mut r#mod: *mut _object = unsafe { core::mem::zeroed() };
+    let mut final_mod: *mut _object = unsafe { core::mem::zeroed() };
+    let mut abs_name: *mut _object = unsafe { core::mem::zeroed() };
+    let mut tstate: *mut _ts = unsafe { core::mem::zeroed() };
+    unsafe {
+        '__join_2: {
+            tstate = _PyThreadState_GET();
+            abs_name = core::ptr::null_mut::<_object>();
+            final_mod = core::ptr::null_mut::<_object>();
+            r#mod = core::ptr::null_mut::<_object>();
+            package = core::ptr::null_mut::<_object>();
+            interp = (*tstate).interp;
+            if name.is_null() {
+                _PyErr_SetString(tstate, PyExc_ValueError, c"Empty module name".as_ptr());
+            } else {
+                // The below code is importlib.__import__() & _gcd_import(), ported to C
+                // for added performance.
+                if PyUnicode_Check!(name) == 0 {
+                    _PyErr_SetString(
+                        tstate,
+                        PyExc_TypeError,
+                        c"module name must be a string".as_ptr(),
+                    );
+                } else {
+                    if level < 0 {
+                        _PyErr_SetString(tstate, PyExc_ValueError, c"level must be >= 0".as_ptr());
+                    } else {
+                        if level > 0 {
+                            abs_name = resolve_name(tstate, name, globals, level);
+                            if abs_name.is_null() {
+                                break '__join_2;
+                            }
+                        } else {
+                            // level == 0
+                            if PyUnicode_GET_LENGTH!(name) == 0 {
+                                _PyErr_SetString(
+                                    tstate,
+                                    PyExc_ValueError,
+                                    c"Empty module name".as_ptr(),
+                                );
+                                break '__join_2;
+                            } else {
+                                abs_name = Py_NewRef!(name);
+                            }
+                        }
+                        r#mod = import_get_module(tstate, abs_name);
+                        if r#mod.is_null() {
+                            __v8 = !_PyErr_Occurred(tstate).is_null();
+                        } else {
+                            __v8 = false;
+                        }
+                        if !__v8 {
+                            if !r#mod.is_null() && r#mod != core::ptr::addr_of_mut!(_Py_NoneStruct)
+                            {
+                                if import_ensure_initialized((*tstate).interp, r#mod, abs_name) < 0
+                                {
+                                    break '__join_2;
+                                } else {
+                                    mod_check = import_get_module(tstate, abs_name);
+                                    if mod_check != r#mod {
+                                        Py_XDECREF!(mod_check);
+                                        if !_PyErr_Occurred(tstate).is_null() {
+                                            break '__join_2;
+                                        } else {
+                                            Py_DECREF!(r#mod);
+                                            r#mod = import_find_and_load(tstate, abs_name);
+                                            if r#mod.is_null() {
+                                                break '__join_2;
+                                            }
+                                        }
+                                    } else {
+                                        Py_DECREF!(mod_check);
+                                    }
+                                }
+                            } else {
+                                Py_XDECREF!(r#mod);
+                                r#mod = import_find_and_load(tstate, abs_name);
+                                if r#mod.is_null() {
+                                    break '__join_2;
+                                }
+                            }
+                            has_from = 0;
+                            if !fromlist.is_null()
+                                && fromlist != core::ptr::addr_of_mut!(_Py_NoneStruct)
+                            {
+                                has_from = PyObject_IsTrue(fromlist);
+                                if has_from < 0 {
+                                    break '__join_2;
+                                }
+                            }
+                            if has_from == 0 {
+                                len = PyUnicode_GET_LENGTH!(name);
+                                if level == 0 || len > 0 {
+                                    dot = PyUnicode_FindChar(name, 46u32, 0i64, len, 1i32);
+                                    if dot != (2i32.wrapping_neg() as i64) {
+                                        if dot == (1i32.wrapping_neg() as i64) {
+                                            // No dot in module name, simple exit
+                                            final_mod = Py_NewRef!(r#mod);
+                                        } else {
+                                            if level == 0 {
+                                                front = PyUnicode_Substring(name, 0i64, dot);
+                                                if !front.is_null() {
+                                                    final_mod = PyImport_ImportModuleLevelObject(
+                                                        front,
+                                                        core::ptr::null_mut::<_object>(),
+                                                        core::ptr::null_mut::<_object>(),
+                                                        core::ptr::null_mut::<_object>(),
+                                                        0i32,
+                                                    );
+                                                    Py_DECREF!(front);
+                                                }
+                                            } else {
+                                                let cut_off: i64 = len.wrapping_sub(dot);
+                                                let abs_name_len: i64 =
+                                                    PyUnicode_GET_LENGTH!(abs_name);
+                                                to_return = PyUnicode_Substring(
+                                                    abs_name,
+                                                    0i64,
+                                                    abs_name_len.wrapping_sub(cut_off),
+                                                );
+                                                if !to_return.is_null() {
+                                                    final_mod =
+                                                        import_get_module(tstate, to_return);
+                                                    if final_mod.is_null() {
+                                                        if _PyErr_Occurred(tstate).is_null() {
+                                                            _PyErr_Format(tstate, PyExc_KeyError, c"%R not in sys.modules as expected".as_ptr(), to_return);
+                                                        }
+                                                        Py_DECREF!(to_return);
+                                                    } else {
+                                                        Py_DECREF!(to_return);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    final_mod = Py_NewRef!(r#mod);
+                                }
+                            } else {
+                                has_path = PyObject_HasAttrWithError(
+                                    r#mod,
+                                    core::ptr::addr_of_mut!(
+                                        _PyRuntime
+                                            .static_objects
+                                            .singletons
+                                            .strings
+                                            .identifiers
+                                            ._py___path__
+                                            ._ascii
+                                            .ob_base
+                                    ),
+                                );
+                                if has_path >= 0 {
+                                    if has_path != 0 {
+                                        final_mod = PyObject_CallMethodObjArgs(
+                                            IMPORTLIB!(interp),
+                                            core::ptr::addr_of_mut!(
+                                                _PyRuntime
+                                                    .static_objects
+                                                    .singletons
+                                                    .strings
+                                                    .identifiers
+                                                    ._py__handle_fromlist
+                                                    ._ascii
+                                                    .ob_base
+                                            ),
+                                            r#mod,
+                                            fromlist,
+                                            IMPORT_FUNC!(interp),
+                                            core::ptr::null_mut::<()>(),
+                                        );
+                                    } else {
+                                        final_mod = Py_NewRef!(r#mod);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Py_XDECREF!(abs_name);
+        Py_XDECREF!(r#mod);
+        Py_XDECREF!(package);
+        if final_mod.is_null() {
+            remove_importlib_frames(tstate);
+        }
+        return final_mod;
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ImportModuleLevel(
+    name: *const i8,
+    globals: *mut _object,
+    locals: *mut _object,
+    fromlist: *mut _object,
+    level: i32,
+) -> *mut _object {
+    let nameobj: *mut _object = unsafe { PyUnicode_FromString(name) };
+    if nameobj.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let r#mod: *mut _object =
+        PyImport_ImportModuleLevelObject(nameobj, globals, locals, fromlist, level);
+    Py_DECREF!(nameobj);
+    r#mod
+}
+
+// Re-import a module of any kind and return its module object, WITH
+// INCREMENTED REFERENCE COUNT
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ReloadModule(m: *mut _object) -> *mut _object {
+    let mut reloaded_module: *mut _object = core::ptr::null_mut::<_object>();
+    let mut importlib: *mut _object = PyImport_GetModule(unsafe {
+        core::ptr::addr_of_mut!(
+            _PyRuntime
+                .static_objects
+                .singletons
+                .strings
+                .identifiers
+                ._py_importlib
+                ._ascii
+                .ob_base
+        )
+    });
+    if importlib.is_null() {
+        if !unsafe { PyErr_Occurred() }.is_null() {
+            return core::ptr::null_mut::<_object>();
+        }
+        importlib = PyImport_ImportModule(c"importlib".as_ptr());
+        if importlib.is_null() {
+            return core::ptr::null_mut::<_object>();
+        }
+    }
+    reloaded_module = PyObject_CallMethodOneArg(
+        importlib,
+        unsafe {
+            core::ptr::addr_of_mut!(
+                _PyRuntime
+                    .static_objects
+                    .singletons
+                    .strings
+                    .identifiers
+                    ._py_reload
+                    ._ascii
+                    .ob_base
+            )
+        },
+        m,
+    );
+    Py_DECREF!(importlib);
+    reloaded_module
+}
+
+// Higher-level import emulator which emulates the "import" statement
+// more accurately -- it invokes the __import__() function from the
+// builtins of the current globals.  This means that the import is
+// done using whatever import hooks are installed in the current
+// environment.
+// A dummy list ["__doc__"] is passed as the 4th argument so that
+// e.g. PyImport_Import(PyUnicode_FromString("win32com.client.gencache"))
+// will return <module "gencache"> instead of <module "win32com">.
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_Import(module_name: *mut _object) -> *mut _object {
+    let mut __v0: bool = unsafe { core::mem::zeroed() };
+    let mut from_list: *mut _object = unsafe { core::mem::zeroed() };
+    let mut r: *mut _object = unsafe { core::mem::zeroed() };
+    let mut builtins: *mut _object = unsafe { core::mem::zeroed() };
+    let mut import: *mut _object = unsafe { core::mem::zeroed() };
+    let mut globals: *mut _object = unsafe { core::mem::zeroed() };
+    let mut tstate: *mut _ts = unsafe { core::mem::zeroed() };
+    unsafe {
+        '__join_0: {
+            tstate = _PyThreadState_GET();
+            globals = core::ptr::null_mut::<_object>();
+            import = core::ptr::null_mut::<_object>();
+            builtins = core::ptr::null_mut::<_object>();
+            r = core::ptr::null_mut::<_object>();
+            from_list = PyList_New(0i64);
+            if !from_list.is_null() {
+                // Get the builtins from current globals
+                globals = PyEval_GetGlobals(); // borrowed
+                if !globals.is_null() {
+                    Py_INCREF!(globals);
+                    // XXX Use _PyEval_EnsureBuiltins()?
+                    builtins = PyObject_GetItem(
+                        globals,
+                        core::ptr::addr_of_mut!(
+                            _PyRuntime
+                                .static_objects
+                                .singletons
+                                .strings
+                                .identifiers
+                                ._py___builtins__
+                                ._ascii
+                                .ob_base
+                        ),
+                    );
+                    if builtins.is_null() {
+                        // XXX Fall back to interp->builtins or sys.modules['builtins']?
+                        break '__join_0;
+                    }
+                } else {
+                    if !_PyErr_Occurred(tstate).is_null() {
+                        break '__join_0;
+                    } else {
+                        // No globals -- use standard builtins, and fake globals
+                        globals = PyDict_New();
+                        if globals.is_null() {
+                            break '__join_0;
+                        } else {
+                            if _PyEval_EnsureBuiltinsWithModule(
+                                tstate,
+                                globals,
+                                core::ptr::addr_of_mut!(builtins),
+                            ) < 0
+                            {
+                                break '__join_0;
+                            }
+                        }
+                    }
+                }
+                // Get the __import__ function from the builtins
+                if PyDict_Check!(builtins) != 0 {
+                    import = PyObject_GetItem(
+                        builtins,
+                        core::ptr::addr_of_mut!(
+                            _PyRuntime
+                                .static_objects
+                                .singletons
+                                .strings
+                                .identifiers
+                                ._py___import__
+                                ._ascii
+                                .ob_base
+                        ),
+                    );
+                    if import.is_null() {
+                        _PyErr_SetObject(
+                            tstate,
+                            PyExc_KeyError,
+                            core::ptr::addr_of_mut!(
+                                _PyRuntime
+                                    .static_objects
+                                    .singletons
+                                    .strings
+                                    .identifiers
+                                    ._py___import__
+                                    ._ascii
+                                    .ob_base
+                            ),
+                        );
+                    }
+                } else {
+                    import = PyObject_GetAttr(
+                        builtins,
+                        core::ptr::addr_of_mut!(
+                            _PyRuntime
+                                .static_objects
+                                .singletons
+                                .strings
+                                .identifiers
+                                ._py___import__
+                                ._ascii
+                                .ob_base
+                        ),
+                    );
+                }
+                if !import.is_null() {
+                    // Call the __import__ function with the proper argument list
+                    // Always use absolute import here.
+                    // Calling for side-effect of import.
+                    r = PyObject_CallFunction(
+                        import,
+                        c"OOOOi".as_ptr(),
+                        module_name,
+                        globals,
+                        globals,
+                        from_list,
+                        0i32,
+                        core::ptr::null_mut::<()>(),
+                    );
+                    if !r.is_null() {
+                        Py_DECREF!(r);
+                        r = import_get_module(tstate, module_name);
+                        if r.is_null() {
+                            __v0 = _PyErr_Occurred(tstate).is_null();
+                        } else {
+                            __v0 = false;
+                        }
+                        if __v0 {
+                            _PyErr_SetObject(tstate, PyExc_KeyError, module_name);
+                        }
+                    }
+                }
+            }
+        }
+        Py_XDECREF!(globals);
+        Py_XDECREF!(builtins);
+        Py_XDECREF!(import);
+        Py_XDECREF!(from_list);
+        return r;
+    }
+}
+
+// runtime lifecycle
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_Init() -> __SlateRecord_initconfig_h_19 {
+    let mut __slate_compound_0: __SlateRecord_initconfig_h_19 = unsafe { core::mem::zeroed() };
+    let mut __slate_compound_1: __SlateRecord_initconfig_h_19 = unsafe { core::mem::zeroed() };
+    if !unsafe { _PyRuntime.imports.inittab }.is_null() {
+        return unsafe {
+            *{
+                __slate_compound_0 = {
+                    let mut __t0: __SlateRecord_initconfig_h_19 = core::mem::zeroed();
+                    __t0._type = 1u32;
+                    __t0.func = _PyStatus_GET_FUNC__45!() as *const i8;
+                    __t0.err_msg = c"global import state already initialized".as_ptr();
+                    __t0
+                };
+                core::ptr::addr_of_mut!(__slate_compound_0)
+            }
+        };
+    }
+    if init_builtin_modules_table() != 0 {
+        return unsafe { PyStatus_NoMemory() };
+    }
+    return unsafe {
+        *{
+            __slate_compound_1 = {
+                let mut __t1: __SlateRecord_initconfig_h_19 = core::mem::zeroed();
+                __t1._type = 0u32;
+                __t1
+            };
+            core::ptr::addr_of_mut!(__slate_compound_1)
+        }
+    };
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_Fini() {
+    // Destroy the database used by _PyImport_{Fixup,Find}Extension
+    //
+    // XXX Should we actually leave them (mostly) intact, since we don't
+    //
+    // ever dlclose() the module files?
+    _extensions_cache_clear_all();
+    // Free memory allocated by _PyImport_Init()
+    fini_builtin_modules_table();
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_Fini2() {
+    // Reset PyImport_Inittab
+    unsafe {
+        PyImport_Inittab = core::ptr::addr_of_mut!(_PyImport_Inittab) as *mut _inittab;
+    }
+    // Free memory allocated by PyImport_ExtendInittab()
+    unsafe { _PyMem_DefaultRawFree(inittab_copy as *mut ()) };
+    unsafe {
+        inittab_copy = core::ptr::null_mut::<_inittab>();
+    }
+}
+
+// interpreter lifecycle
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_InitCore(
+    tstate: *mut _ts,
+    sysmod: *mut _object,
+    importlib: i32,
+) -> __SlateRecord_initconfig_h_19 {
+    let mut __slate_compound_0: __SlateRecord_initconfig_h_19 = unsafe { core::mem::zeroed() };
+    let mut __slate_compound_1: __SlateRecord_initconfig_h_19 = unsafe { core::mem::zeroed() };
+    // XXX Initialize here: interp->modules and interp->import_func.
+    //
+    // XXX Initialize here: sys.modules and sys.meta_path.
+    if importlib != 0 {
+        // This call sets up builtin and frozen import support
+        if init_importlib(tstate, sysmod) < 0 {
+            return unsafe {
+                *{
+                    __slate_compound_0 = {
+                        let mut __t0: __SlateRecord_initconfig_h_19 = core::mem::zeroed();
+                        __t0._type = 1u32;
+                        __t0.func = _PyStatus_GET_FUNC__42!() as *const i8;
+                        __t0.err_msg = c"failed to initialize importlib".as_ptr();
+                        __t0
+                    };
+                    core::ptr::addr_of_mut!(__slate_compound_0)
+                }
+            };
+        }
+    }
+    return unsafe {
+        *{
+            __slate_compound_1 = {
+                let mut __t1: __SlateRecord_initconfig_h_19 = core::mem::zeroed();
+                __t1._type = 0u32;
+                __t1
+            };
+            core::ptr::addr_of_mut!(__slate_compound_1)
+        }
+    };
+}
+
+// In some corner cases it is important to be sure that the import
+// machinery has been initialized (or not cleaned up yet).  For
+// example, see issue #4236 and PyModule_Create2().
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_IsInitialized(interp: *mut _is) -> i32 {
+    if MODULES!(interp).is_null() {
+        return 0;
+    }
+    1
+}
+
+/// Clear the direct per-interpreter import state, if not cleared already.
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_ClearCore(interp: *mut _is) {
+    // interp->modules should have been cleaned up and cleared already
+    // by _PyImport_FiniCore().
+    Py_CLEAR!((*interp).imports.modules);
+    Py_CLEAR!((*interp).imports.modules_by_index);
+    Py_CLEAR!((*interp).imports.importlib);
+    Py_CLEAR!((*interp).imports.import_func);
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_FiniCore(interp: *mut _is) {
+    let verbose: i32 = unsafe { (*_PyInterpreterState_GetConfig(interp)).verbose };
+    if (unsafe { _PySys_ClearAttrString(interp, c"meta_path".as_ptr(), verbose) }) < 0 {
+        unsafe {
+            PyErr_FormatUnraisable(c"Exception ignored while clearing sys.meta_path".as_ptr())
+        };
+    }
+    // XXX Pull in most of finalize_modules() in pylifecycle.c.
+    if (unsafe { _PySys_ClearAttrString(interp, c"modules".as_ptr(), verbose) }) < 0 {
+        unsafe { PyErr_FormatUnraisable(c"Exception ignored while clearing sys.modules".as_ptr()) };
+    }
+    _PyImport_ClearCore(interp);
+}
+
+// XXX Add something like _PyImport_Disable() for use early in interp fini?
+// "external" imports
+fn init_zipimport(tstate: *mut _ts, verbose: i32) -> i32 {
+    let path_hooks: *mut _object = unsafe { _PySys_GetRequiredAttrString(c"path_hooks".as_ptr()) };
+    if path_hooks.is_null() {
+        return 1i32.wrapping_neg();
+    }
+    if verbose != 0 {
+        unsafe { PySys_WriteStderr(c"# installing zipimport hook\n".as_ptr()) };
+    }
+    let zipimporter: *mut _object =
+        PyImport_ImportModuleAttrString(c"zipimport".as_ptr(), c"zipimporter".as_ptr());
+    if zipimporter.is_null() {
+        unsafe { _PyErr_Clear(tstate) }; // No zipimporter object -- okay
+        if verbose != 0 {
+            unsafe { PySys_WriteStderr(c"# can't import zipimport.zipimporter\n".as_ptr()) };
+        }
+    } else {
+        // sys.path_hooks.insert(0, zipimporter)
+        let err: i32 = unsafe { PyList_Insert(path_hooks, 0i64, zipimporter) };
+        Py_DECREF!(zipimporter);
+        if err < 0 {
+            Py_DECREF!(path_hooks);
+            return 1i32.wrapping_neg();
+        }
+        if verbose != 0 {
+            unsafe { PySys_WriteStderr(c"# installed zipimport hook\n".as_ptr()) };
+        }
+    }
+    Py_DECREF!(path_hooks);
+    0
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_InitExternal(tstate: *mut _ts) -> __SlateRecord_initconfig_h_19 {
+    let mut __slate_compound_0: __SlateRecord_initconfig_h_19 = unsafe { core::mem::zeroed() };
+    let mut __slate_compound_1: __SlateRecord_initconfig_h_19 = unsafe { core::mem::zeroed() };
+    let mut __slate_compound_2: __SlateRecord_initconfig_h_19 = unsafe { core::mem::zeroed() };
+    let verbose: i32 = unsafe { (*_PyInterpreterState_GetConfig((*tstate).interp)).verbose };
+    // XXX Initialize here: sys.path_hooks and sys.path_importer_cache.
+    if init_importlib_external(unsafe { (*tstate).interp }) != 0 {
+        unsafe { _PyErr_Print(tstate) };
+        return unsafe {
+            *{
+                __slate_compound_0 = {
+                    let mut __t0: __SlateRecord_initconfig_h_19 = core::mem::zeroed();
+                    __t0._type = 1u32;
+                    __t0.func = _PyStatus_GET_FUNC__27!() as *const i8;
+                    __t0.err_msg = c"external importer setup failed".as_ptr();
+                    __t0
+                };
+                core::ptr::addr_of_mut!(__slate_compound_0)
+            }
+        };
+    }
+    if init_zipimport(tstate, verbose) != 0 {
+        unsafe { PyErr_Print() };
+        return unsafe {
+            *{
+                __slate_compound_1 = {
+                    let mut __t1: __SlateRecord_initconfig_h_19 = core::mem::zeroed();
+                    __t1._type = 1u32;
+                    __t1.func = _PyStatus_GET_FUNC__27!() as *const i8;
+                    __t1.err_msg = c"initializing zipimport failed".as_ptr();
+                    __t1
+                };
+                core::ptr::addr_of_mut!(__slate_compound_1)
+            }
+        };
+    }
+    return unsafe {
+        *{
+            __slate_compound_2 = {
+                let mut __t2: __SlateRecord_initconfig_h_19 = core::mem::zeroed();
+                __t2._type = 0u32;
+                __t2
+            };
+            core::ptr::addr_of_mut!(__slate_compound_2)
+        }
+    };
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn _PyImport_FiniExternal(interp: *mut _is) {
+    let verbose: i32 = unsafe { (*_PyInterpreterState_GetConfig(interp)).verbose };
+    // XXX Uninstall importlib metapath importers here?
+    if (unsafe { _PySys_ClearAttrString(interp, c"path_importer_cache".as_ptr(), verbose) }) < 0 {
+        unsafe {
+            PyErr_FormatUnraisable(
+                c"Exception ignored while clearing sys.path_importer_cache".as_ptr(),
+            )
+        };
+    }
+    if (unsafe { _PySys_ClearAttrString(interp, c"path_hooks".as_ptr(), verbose) }) < 0 {
+        unsafe {
+            PyErr_FormatUnraisable(c"Exception ignored while clearing sys.path_hooks".as_ptr())
+        };
+    }
+}
+
+// module helpers
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ImportModuleAttr(
+    modname: *mut _object,
+    attrname: *mut _object,
+) -> *mut _object {
+    let r#mod: *mut _object = PyImport_Import(modname);
+    if r#mod.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let result: *mut _object = unsafe { PyObject_GetAttr(r#mod, attrname) };
+    Py_DECREF!(r#mod);
+    result
+}
+
+#[unsafe(no_mangle)]
+extern "C-unwind" fn PyImport_ImportModuleAttrString(
+    modname: *const i8,
+    attrname: *const i8,
+) -> *mut _object {
+    let pmodname: *mut _object = unsafe { PyUnicode_FromString(modname) };
+    if pmodname.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let pattrname: *mut _object = unsafe { PyUnicode_FromString(attrname) };
+    if pattrname.is_null() {
+        Py_DECREF!(pmodname);
+        return core::ptr::null_mut::<_object>();
+    }
+    let result: *mut _object = PyImport_ImportModuleAttr(pmodname, pattrname);
+    Py_DECREF!(pattrname);
+    Py_DECREF!(pmodname);
+    result
+}
+
+// the module
+// [clinic input]
+// _imp.lock_held
+//
+// Return True if the import lock is currently held, else False.
+//
+// On platforms without threads, return False.
+// [clinic start generated code]
+/// [clinic end generated code: output=8b89384b5e1963fc input=9b088f9b217d9bdf]
+fn _imp_lock_held_impl(module: *mut _object) -> *mut _object {
+    let interp: *mut _is = _PyInterpreterState_GET();
+    unsafe {
+        PyBool_FromLong(
+            _PyMutex_IsLocked(core::ptr::addr_of_mut!((*interp).imports.lock.mutex)) as i64,
+        )
+    }
+}
+
+// [clinic input]
+// _imp.acquire_lock
+//
+// Acquires the interpreter's import lock for the current thread.
+//
+// This lock should be used by import hooks to ensure thread-safety when
+// importing modules.  On platforms without threads, this function does
+// nothing.
+// [clinic start generated code]
+/// [clinic end generated code: output=1aff58cb0ee1b026 input=60e9c1b4ab471ead]
+fn _imp_acquire_lock_impl(module: *mut _object) -> *mut _object {
+    let interp: *mut _is = _PyInterpreterState_GET();
+    _PyImport_AcquireLock(interp);
+    unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) }
+}
+
+// [clinic input]
+// _imp.release_lock
+//
+// Release the interpreter's import lock.
+//
+// On platforms without threads, this function does nothing.
+// [clinic start generated code]
+/// [clinic end generated code: output=7faab6d0be178b0a input=934fb11516dd778b]
+fn _imp_release_lock_impl(module: *mut _object) -> *mut _object {
+    let interp: *mut _is = _PyInterpreterState_GET();
+    if (unsafe {
+        _PyRecursiveMutex_IsLockedByCurrentThread(core::ptr::addr_of_mut!((*interp).imports.lock))
+    }) == 0
+    {
+        unsafe { PyErr_SetString(PyExc_RuntimeError, c"not holding the import lock".as_ptr()) };
+        return core::ptr::null_mut::<_object>();
+    }
+    _PyImport_ReleaseLock(interp);
+    unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) }
+}
+
+// [clinic input]
+// _imp._fix_co_filename
+//
+//     code: object(type="PyCodeObject *", subclass_of="&PyCode_Type")
+//         Code object to change.
+//
+//     path: unicode
+//         File path to use.
+//     /
+//
+// Changes code.co_filename to specify the passed-in file path.
+// [clinic start generated code]
+/// [clinic end generated code: output=1d002f100235587d input=895ba50e78b82f05]
+fn _imp__fix_co_filename_impl(
+    module: *mut _object,
+    code: *mut PyCodeObject,
+    path: *mut _object,
+) -> *mut _object {
+    update_compiled_module(code, path);
+    unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) }
+}
+
+// [clinic input]
+// _imp.create_builtin
+//
+//     spec: object
+//     /
+//
+// Create an extension module.
+// [clinic start generated code]
+#[unsafe(link_section = ".text.slate_distinct.import._imp_create_builtin")]
+extern "C-unwind" fn _imp_create_builtin(module: *mut _object, spec: *mut _object) -> *mut _object {
+    let tstate: *mut _ts = _PyThreadState_GET();
+    let name: *mut _object = unsafe { PyObject_GetAttrString(spec, c"name".as_ptr()) };
+    if name.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    if PyUnicode_Check!(name) == 0 {
+        unsafe {
+            PyErr_Format(
+                PyExc_TypeError,
+                c"name must be string, not %.200s".as_ptr(),
+                (*Py_TYPE!(name)).tp_name,
+            )
+        };
+        Py_DECREF!(name);
+        return core::ptr::null_mut::<_object>();
+    }
+    let r#mod: *mut _object = create_builtin(tstate, name, spec);
+    Py_DECREF!(name);
+    r#mod
+}
+
+// [clinic input]
+// _imp.extension_suffixes
+//
+// Returns the list of file suffixes used to identify extension modules.
+// [clinic start generated code]
+// [clinic end generated code: output=ace7ff22271e6f39 input=37f966f890384e47]
+/// [clinic end generated code: output=0bf346e25a8f0cd3 input=ecdeeecfcb6f839e]
+fn _imp_extension_suffixes_impl(module: *mut _object) -> *mut _object {
+    let list: *mut _object = unsafe { PyList_New(0i64) };
+    if list.is_null() {
+        return core::ptr::null_mut::<_object>();
+    }
+    let mut index: u32 = 0;
+    loop {
+        let __v2: *const i8 = unsafe {
+            *(core::ptr::addr_of_mut!(_PyImport_DynLoadFiletab) as *mut *const i8)
+                .wrapping_offset(index as isize)
+        };
+        let suffix: *const i8 = __v2;
+        if __v2.is_null() {
+            break;
+        }
+        let item: *mut _object = unsafe { PyUnicode_FromString(suffix) };
+        if item.is_null() {
+            Py_DECREF!(list);
+            return core::ptr::null_mut::<_object>();
+        }
+        if (unsafe { PyList_Append(list, item) }) < 0 {
+            Py_DECREF!(list);
+            Py_DECREF!(item);
+            return core::ptr::null_mut::<_object>();
+        }
+        Py_DECREF!(item);
+        index = index.wrapping_add(1);
+    }
+    list
+}
+
+// [clinic input]
+// _imp.init_frozen
+//
+//     name: unicode
+//     /
+//
+// Initializes a frozen module.
+// [clinic start generated code]
+/// [clinic end generated code: output=fc0511ed869fd69c input=13019adfc04f3fb3]
+fn _imp_init_frozen_impl(module: *mut _object, name: *mut _object) -> *mut _object {
+    let tstate: *mut _ts = _PyThreadState_GET();
+    let ret: i32 = PyImport_ImportFrozenModuleObject(name);
+    if ret < 0 {
+        return core::ptr::null_mut::<_object>();
+    }
+    if ret == 0 {
+        return unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) };
+    }
+    import_add_module(tstate, name)
+}
+
+// [clinic input]
+// _imp.find_frozen
+//
+//     name: unicode
+//     /
+//     *
+//     withdata: bool = False
+//
+// Return info about the corresponding frozen module (if there is one) or None.
+//
+// The returned info (a 2-tuple):
+//
+//  * data         the raw marshalled bytes
+//  * is_package   whether or not it is a package
+//  * origname     the originally frozen module's name, or None if not
+//                 a stdlib module (this will usually be the same as
+//                 the module's current name)
+// [clinic start generated code]
+/// [clinic end generated code: output=8c1c3c7f925397a5 input=22a8847c201542fd]
+fn _imp_find_frozen_impl(module: *mut _object, name: *mut _object, withdata: i32) -> *mut _object {
+    let mut info: frozen_info = unsafe { core::mem::zeroed() };
+    let status: u32 = find_frozen(name, core::ptr::addr_of_mut!(info));
+    if (status as u32) == 2 || (status as u32) == 3 {
+        return unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) };
+    } else {
+        if (status as u32) == 1 {
+            return unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) };
+        } else {
+            if (status as u32) != 0 {
+                set_frozen_error(status, name);
+                return core::ptr::null_mut::<_object>();
+            }
+        }
+    }
+    let mut data: *mut _object = core::ptr::null_mut::<_object>();
+    if withdata != 0 {
+        data = unsafe { PyMemoryView_FromMemory(info.data as *mut i8, info.size, 256i32) };
+        if data.is_null() {
+            return core::ptr::null_mut::<_object>();
+        }
+    }
+    let mut origname: *mut _object = core::ptr::null_mut::<_object>();
+    if !info.origname.is_null()
+        && ((unsafe { *info.origname.wrapping_offset(0 as isize) }) as i32) != 0
+    {
+        origname = unsafe { PyUnicode_FromString(info.origname) };
+        if origname.is_null() {
+            Py_XDECREF!(data);
+            return core::ptr::null_mut::<_object>();
+        }
+    }
+    let result: *mut _object = unsafe {
+        PyTuple_Pack(
+            3i64,
+            if !data.is_null() {
+                data
+            } else {
+                core::ptr::addr_of_mut!(_Py_NoneStruct)
+            },
+            if info.is_package {
+                _PyObject_CAST__2!(core::ptr::addr_of_mut!(_Py_TrueStruct))
+            } else {
+                _PyObject_CAST__2!(core::ptr::addr_of_mut!(_Py_FalseStruct))
+            },
+            if !origname.is_null() {
+                origname
+            } else {
+                core::ptr::addr_of_mut!(_Py_NoneStruct)
+            },
+        )
+    };
+    Py_XDECREF!(origname);
+    Py_XDECREF!(data);
+    result
+}
+
+// [clinic input]
+// _imp.get_frozen_object
+//
+//     name: unicode
+//     data as dataobj: object = None
+//     /
+//
+// Create a code object for a frozen module.
+// [clinic start generated code]
+/// [clinic end generated code: output=54368a673a35e745 input=034bdb88f6460b7b]
+fn _imp_get_frozen_object_impl(
+    module: *mut _object,
+    name: *mut _object,
+    dataobj: *mut _object,
+) -> *mut _object {
+    let mut info: frozen_info = {
+        let mut __t0: frozen_info = unsafe { core::mem::zeroed() };
+        __t0.nameobj = core::ptr::null_mut::<_object>();
+        __t0
+    };
+    let mut buf: __SlateRecord_pybuffer_h_33 = {
+        let mut __t1: __SlateRecord_pybuffer_h_33 = unsafe { core::mem::zeroed() };
+        __t1.buf = core::ptr::null_mut::<()>();
+        __t1
+    };
+    if (unsafe { PyObject_CheckBuffer(dataobj) }) != 0 {
+        if (unsafe { PyObject_GetBuffer(dataobj, core::ptr::addr_of_mut!(buf), 0i32) }) != 0 {
+            return core::ptr::null_mut::<_object>();
+        }
+        info.data = buf.buf as *const i8;
+        info.size = buf.len;
+    } else {
+        if dataobj != unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) } {
+            unsafe {
+                _PyArg_BadArgument(
+                    c"get_frozen_object".as_ptr(),
+                    c"argument 2".as_ptr(),
+                    c"bytes".as_ptr(),
+                    dataobj,
+                )
+            };
+            return core::ptr::null_mut::<_object>();
+        } else {
+            let status: u32 = find_frozen(name, core::ptr::addr_of_mut!(info));
+            if (status as u32) != 0 {
+                set_frozen_error(status, name);
+                return core::ptr::null_mut::<_object>();
+            }
+        }
+    }
+    if info.nameobj.is_null() {
+        info.nameobj = name;
+    }
+    if info.size == 0 {
+        // Does not contain executable code.
+        set_frozen_error(5u32, name);
+        return core::ptr::null_mut::<_object>();
+    }
+    let interp: *mut _is = _PyInterpreterState_GET();
+    let codeobj: *mut _object =
+        unmarshal_frozen_code(interp, unsafe { &(*core::ptr::addr_of_mut!(info)) });
+    if dataobj != unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) } {
+        unsafe { PyBuffer_Release(core::ptr::addr_of_mut!(buf)) };
+    }
+    codeobj
+}
+
+// [clinic input]
+// _imp.is_frozen_package
+//
+//     name: unicode
+//     /
+//
+// Returns True if the module name is of a frozen package.
+// [clinic start generated code]
+/// [clinic end generated code: output=e70cbdb45784a1c9 input=81b6cdecd080fbb8]
+fn _imp_is_frozen_package_impl(module: *mut _object, name: *mut _object) -> *mut _object {
+    let mut info: frozen_info = unsafe { core::mem::zeroed() };
+    let status: u32 = find_frozen(name, core::ptr::addr_of_mut!(info));
+    if (status as u32) != 0 && (status as u32) != 4 {
+        set_frozen_error(status, name);
+        return core::ptr::null_mut::<_object>();
+    }
+    unsafe { PyBool_FromLong(info.is_package as i64) }
+}
+
+// [clinic input]
+// _imp.is_builtin
+//
+//     name: unicode
+//     /
+//
+// Returns True if the module name corresponds to a built-in module.
+// [clinic start generated code]
+/// [clinic end generated code: output=3bfd1162e2d3be82 input=86befdac021dd1c7]
+fn _imp_is_builtin_impl(module: *mut _object, name: *mut _object) -> *mut _object {
+    unsafe { PyLong_FromLong(is_builtin(name) as i64) }
+}
+
+// [clinic input]
+// _imp.is_frozen
+//
+//     name: unicode
+//     /
+//
+// Returns True if the module name corresponds to a frozen module.
+// [clinic start generated code]
+/// [clinic end generated code: output=01f408f5ec0f2577 input=7301dbca1897d66b]
+fn _imp_is_frozen_impl(module: *mut _object, name: *mut _object) -> *mut _object {
+    let mut info: frozen_info = unsafe { core::mem::zeroed() };
+    let status: u32 = find_frozen(name, core::ptr::addr_of_mut!(info));
+    if (status as u32) != 0 {
+        return _PyObject_CAST__2!(unsafe { core::ptr::addr_of_mut!(_Py_FalseStruct) });
+    }
+    _PyObject_CAST__2!(unsafe { core::ptr::addr_of_mut!(_Py_TrueStruct) })
+}
+
+// [clinic input]
+// _imp._frozen_module_names
+//
+// Returns the list of available frozen modules.
+// [clinic start generated code]
+/// [clinic end generated code: output=80609ef6256310a8 input=76237fbfa94460d2]
+fn _imp__frozen_module_names_impl(module: *mut _object) -> *mut _object {
+    list_frozen_module_names()
+}
+
+// [clinic input]
+// _imp._override_frozen_modules_for_tests
+//
+//     override: int
+//     /
+//
+// (internal-only) Override PyConfig.use_frozen_modules.
+//
+// (-1: "off", 1: "on", 0: no override)
+// See frozen_modules() in Lib/test/support/import_helper.py.
+// [clinic start generated code]
+/// [clinic end generated code: output=36d5cb1594160811 input=8f1f95a3ef21aec3]
+fn _imp__override_frozen_modules_for_tests_impl(
+    module: *mut _object,
+    r#override: i32,
+) -> *mut _object {
+    let interp: *mut _is = _PyInterpreterState_GET();
+    unsafe {
+        (*interp).imports.override_frozen_modules = r#override;
+    }
+    unsafe { core::ptr::addr_of_mut!(_Py_NoneStruct) }
+}
+
+// [clinic input]
+// _imp._override_multi_interp_extensions_check
+//
+//     override: int
+//     /
+//
+// (internal-only) Override PyInterpreterConfig.check_multi_interp_extensions.
+//
+// (-1: "never", 1: "always", 0: no override)
+// [clinic start generated code]
+/// [clinic end generated code: output=3ff043af52bbf280 input=e086a2ea181f92ae]
+fn _imp__override_multi_interp_extensions_check_impl(
+    module: *mut _object,
+    r#override: i32,
+) -> *mut _object {
+    let interp: *mut _is = _PyInterpreterState_GET();
+    if _Py_IsMainInterpreter(interp) != 0 {
+        unsafe {
+            PyErr_SetString(PyExc_RuntimeError, c"_imp._override_multi_interp_extensions_check() cannot be used in the main interpreter".as_ptr())
+        };
+        return core::ptr::null_mut::<_object>();
+    }
+    let oldvalue: i32 = OVERRIDE_MULTI_INTERP_EXTENSIONS_CHECK!(interp);
+    unsafe {
+        (*interp).imports.override_multi_interp_extensions_check = r#override;
+    }
+    unsafe { PyLong_FromLong(oldvalue as i64) }
+}
+
+// [clinic input]
+// _imp.create_dynamic
+//
+//     spec: object
+//     file: object = NULL
+//     /
+//
+// Create an extension module.
+// [clinic start generated code]
+/// [clinic end generated code: output=83249b827a4fde77 input=c31b954f4cf4e09d]
+fn _imp_create_dynamic_impl(
+    module: *mut _object,
+    spec: *mut _object,
+    file: *mut _object,
+) -> *mut _object {
+    let mut p0: core::mem::MaybeUninit<Option<unsafe extern "C-unwind" fn() -> *mut _object>> =
+        core::mem::MaybeUninit::uninit();
+    let __slate_slot_0: *mut Option<unsafe extern "C-unwind" fn() -> *mut _object> =
+        core::ptr::addr_of_mut!(p0) as *mut Option<unsafe extern "C-unwind" fn() -> *mut _object>;
+    let mut cached: *mut extensions_cache_value = unsafe { core::mem::zeroed() };
+    let mut info: core::mem::MaybeUninit<_Py_ext_module_loader_info> =
+        core::mem::MaybeUninit::uninit();
+    let __slate_slot_2: *mut _Py_ext_module_loader_info =
+        core::ptr::addr_of_mut!(info) as *mut _Py_ext_module_loader_info;
+    let mut tstate: *mut _ts = unsafe { core::mem::zeroed() };
+    let mut r#mod: *mut _object = unsafe { core::mem::zeroed() };
+    let mut fp: *mut slate_support::FILE = unsafe { core::mem::zeroed() };
+    unsafe {
+        fp = core::ptr::null_mut::<slate_support::FILE>();
+        r#mod = core::ptr::null_mut::<_object>();
+        tstate = _PyThreadState_GET();
+        if _Py_ext_module_loader_info_init_from_spec(core::ptr::addr_of_mut!(*__slate_slot_2), spec)
+            < 0
+        {
+            return core::ptr::null_mut::<_object>();
+        } else {
+            '__join_2: {
+                cached = core::ptr::null_mut::<extensions_cache_value>();
+                r#mod = import_find_extension(
+                    tstate,
+                    core::ptr::addr_of_mut!(*__slate_slot_2),
+                    &mut (*core::ptr::addr_of_mut!(cached)),
+                );
+                if !r#mod.is_null() {
+                    // The module might not have md_def set in certain reload cases.
+                } else {
+                    if _PyErr_Occurred(tstate).is_null() {
+                        // Otherwise it must be multi-phase init or the first time it's loaded.
+                        // If the module was added to the global cache
+                        // but def->m_base.m_copy was cleared (e.g. subinterp fini)
+                        // then we have to do a little dance here.
+                        if !cached.is_null() {
+                            // For now we clear the cache and move on.
+                            _extensions_cache_delete(
+                                (*__slate_slot_2).path,
+                                (*__slate_slot_2).name,
+                            );
+                        }
+                        if PySys_Audit(
+                            c"import".as_ptr(),
+                            c"OOOOO".as_ptr(),
+                            (*__slate_slot_2).name,
+                            (*__slate_slot_2).filename,
+                            core::ptr::addr_of_mut!(_Py_NoneStruct),
+                            core::ptr::addr_of_mut!(_Py_NoneStruct),
+                            core::ptr::addr_of_mut!(_Py_NoneStruct),
+                        ) >= 0
+                        {
+                            // We would move this (and the fclose() below) into
+                            // _PyImport_GetModInitFunc(), but it isn't clear if the intervening
+                            // code relies on fp still being open.
+                            if !file.is_null() {
+                                fp = Py_fopen((*__slate_slot_2).filename, c"r".as_ptr());
+                                if fp.is_null() {
+                                    break '__join_2;
+                                }
+                            }
+                            core::ptr::write(
+                                __slate_slot_0,
+                                _PyImport_GetModInitFunc(
+                                    core::ptr::addr_of_mut!(*__slate_slot_2),
+                                    fp,
+                                ),
+                            );
+                            if *__slate_slot_0 != None {
+                                r#mod = import_run_extension(
+                                    tstate,
+                                    *__slate_slot_0,
+                                    core::ptr::addr_of_mut!(*__slate_slot_2),
+                                    spec,
+                                    get_modules_dict(tstate, true),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            if !fp.is_null() {
+                slate_support::fclose(fp);
+            }
+            _Py_ext_module_loader_info_clear(core::ptr::addr_of_mut!(*__slate_slot_2));
+            return r#mod;
+        }
+    }
+}
+
+// [clinic input]
+// _imp.exec_dynamic -> int
+//
+//     mod: object
+//     /
+//
+// Initialize an extension module.
+// [clinic start generated code]
+/// [clinic end generated code: output=f5720ac7b465877d input=9fdbfcb250280d3a]
+fn _imp_exec_dynamic_impl(module: *mut _object, r#mod: *mut _object) -> i32 {
+    exec_builtin_or_dynamic(r#mod)
+}
+
+// [clinic input]
+// _imp.exec_builtin -> int
+//
+//     mod: object
+//     /
+//
+// Initialize a built-in module.
+// [clinic start generated code]
+/// [clinic end generated code: output=0262447b240c038e input=7beed5a2f12a60ca]
+fn _imp_exec_builtin_impl(module: *mut _object, r#mod: *mut _object) -> i32 {
+    exec_builtin_or_dynamic(r#mod)
+}
+
+// [clinic input]
+// _imp.source_hash
+//
+//     key: long
+//     source: Py_buffer
+// [clinic start generated code]
+/// [clinic end generated code: output=edb292448cf399ea input=9aaad1e590089789]
+fn _imp_source_hash_impl(
+    module: *mut _object,
+    key: i64,
+    source: &__SlateRecord_pybuffer_h_33,
+) -> *mut _object {
+    let mut hash: __SlateRecord_import_c_4895 = unsafe { core::mem::zeroed() };
+    unsafe {
+        hash.x = _Py_KeyedHash(
+            key as u64,
+            (*(source as *const __SlateRecord_pybuffer_h_33)).buf as *const (),
+            (*(source as *const __SlateRecord_pybuffer_h_33)).len,
+        );
+    }
+    unsafe {
+        PyBytes_FromStringAndSize(
+            (hash.data.as_mut_ptr() as *mut i8) as *const i8,
+            core::mem::size_of::<[i8; 8]>() as i64,
+        )
+    }
+}
+
+static doc_imp: __SlateAlign16<[i8; 66]> = __SlateAlign16([
+    40i8, 69i8, 120i8, 116i8, 114i8, 101i8, 109i8, 101i8, 108i8, 121i8, 41i8, 32i8, 108i8, 111i8,
+    119i8, 45i8, 108i8, 101i8, 118i8, 101i8, 108i8, 32i8, 105i8, 109i8, 112i8, 111i8, 114i8, 116i8,
+    32i8, 109i8, 97i8, 99i8, 104i8, 105i8, 110i8, 101i8, 114i8, 121i8, 32i8, 98i8, 105i8, 116i8,
+    115i8, 32i8, 97i8, 115i8, 32i8, 117i8, 115i8, 101i8, 100i8, 32i8, 98i8, 121i8, 32i8, 105i8,
+    109i8, 112i8, 111i8, 114i8, 116i8, 108i8, 105i8, 98i8, 46i8, 0i8,
+]);
+
+/// sentinel
+static mut imp_methods: __SlateAlign16<[PyMethodDef; 20]> = __SlateAlign16([
+    {
+        let mut __t0: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t0.ml_name = (b"extension_suffixes\0".as_ptr() as *mut i8) as *const i8;
+        __t0.ml_meth = Some(_imp_extension_suffixes);
+        __t0.ml_flags = 4i32;
+        __t0.ml_doc = unsafe { core::ptr::addr_of!(_imp_extension_suffixes__doc__.0) as *const i8 };
+        __t0
+    },
+    {
+        let mut __t1: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t1.ml_name = (b"lock_held\0".as_ptr() as *mut i8) as *const i8;
+        __t1.ml_meth = Some(_imp_lock_held);
+        __t1.ml_flags = 4i32;
+        __t1.ml_doc = unsafe { core::ptr::addr_of!(_imp_lock_held__doc__.0) as *const i8 };
+        __t1
+    },
+    {
+        let mut __t2: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t2.ml_name = (b"acquire_lock\0".as_ptr() as *mut i8) as *const i8;
+        __t2.ml_meth = Some(_imp_acquire_lock);
+        __t2.ml_flags = 4i32;
+        __t2.ml_doc = unsafe { core::ptr::addr_of!(_imp_acquire_lock__doc__.0) as *const i8 };
+        __t2
+    },
+    {
+        let mut __t3: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t3.ml_name = (b"release_lock\0".as_ptr() as *mut i8) as *const i8;
+        __t3.ml_meth = Some(_imp_release_lock);
+        __t3.ml_flags = 4i32;
+        __t3.ml_doc = unsafe { core::ptr::addr_of!(_imp_release_lock__doc__.0) as *const i8 };
+        __t3
+    },
+    {
+        let mut __t4: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t4.ml_name = (b"find_frozen\0".as_ptr() as *mut i8) as *const i8;
+        __t4.ml_meth = unsafe {
+            core::mem::transmute::<
+                Option<unsafe extern "C-unwind" fn()>,
+                Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+            >(unsafe {
+                core::mem::transmute::<
+                    Option<
+                        unsafe extern "C-unwind" fn(
+                            *mut _object,
+                            *const *mut _object,
+                            i64,
+                            *mut _object,
+                        ) -> *mut _object,
+                    >,
+                    Option<unsafe extern "C-unwind" fn()>,
+                >(Some(_imp_find_frozen))
+            })
+        };
+        __t4.ml_flags = 130i32;
+        __t4.ml_doc = unsafe { core::ptr::addr_of!(_imp_find_frozen__doc__.0) as *const i8 };
+        __t4
+    },
+    {
+        let mut __t5: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t5.ml_name = (b"get_frozen_object\0".as_ptr() as *mut i8) as *const i8;
+        __t5.ml_meth = unsafe {
+            core::mem::transmute::<
+                Option<unsafe extern "C-unwind" fn()>,
+                Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+            >(unsafe {
+                core::mem::transmute::<
+                    Option<
+                        unsafe extern "C-unwind" fn(
+                            *mut _object,
+                            *const *mut _object,
+                            i64,
+                        ) -> *mut _object,
+                    >,
+                    Option<unsafe extern "C-unwind" fn()>,
+                >(Some(_imp_get_frozen_object))
+            })
+        };
+        __t5.ml_flags = 128i32;
+        __t5.ml_doc = unsafe { core::ptr::addr_of!(_imp_get_frozen_object__doc__.0) as *const i8 };
+        __t5
+    },
+    {
+        let mut __t6: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t6.ml_name = (b"is_frozen_package\0".as_ptr() as *mut i8) as *const i8;
+        __t6.ml_meth = Some(_imp_is_frozen_package);
+        __t6.ml_flags = 8i32;
+        __t6.ml_doc = unsafe { core::ptr::addr_of!(_imp_is_frozen_package__doc__.0) as *const i8 };
+        __t6
+    },
+    {
+        let mut __t7: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t7.ml_name = (b"create_builtin\0".as_ptr() as *mut i8) as *const i8;
+        __t7.ml_meth = Some(_imp_create_builtin);
+        __t7.ml_flags = 8i32;
+        __t7.ml_doc = unsafe { core::ptr::addr_of!(_imp_create_builtin__doc__.0) as *const i8 };
+        __t7
+    },
+    {
+        let mut __t8: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t8.ml_name = (b"init_frozen\0".as_ptr() as *mut i8) as *const i8;
+        __t8.ml_meth = Some(_imp_init_frozen);
+        __t8.ml_flags = 8i32;
+        __t8.ml_doc = unsafe { core::ptr::addr_of!(_imp_init_frozen__doc__.0) as *const i8 };
+        __t8
+    },
+    {
+        let mut __t9: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t9.ml_name = (b"is_builtin\0".as_ptr() as *mut i8) as *const i8;
+        __t9.ml_meth = Some(_imp_is_builtin);
+        __t9.ml_flags = 8i32;
+        __t9.ml_doc = unsafe { core::ptr::addr_of!(_imp_is_builtin__doc__.0) as *const i8 };
+        __t9
+    },
+    {
+        let mut __t10: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t10.ml_name = (b"is_frozen\0".as_ptr() as *mut i8) as *const i8;
+        __t10.ml_meth = Some(_imp_is_frozen);
+        __t10.ml_flags = 8i32;
+        __t10.ml_doc = unsafe { core::ptr::addr_of!(_imp_is_frozen__doc__.0) as *const i8 };
+        __t10
+    },
+    {
+        let mut __t11: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t11.ml_name = (b"_frozen_module_names\0".as_ptr() as *mut i8) as *const i8;
+        __t11.ml_meth = Some(_imp__frozen_module_names);
+        __t11.ml_flags = 4i32;
+        __t11.ml_doc =
+            unsafe { core::ptr::addr_of!(_imp__frozen_module_names__doc__.0) as *const i8 };
+        __t11
+    },
+    {
+        let mut __t12: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t12.ml_name = (b"_override_frozen_modules_for_tests\0".as_ptr() as *mut i8) as *const i8;
+        __t12.ml_meth = Some(_imp__override_frozen_modules_for_tests);
+        __t12.ml_flags = 8i32;
+        __t12.ml_doc = unsafe {
+            core::ptr::addr_of!(_imp__override_frozen_modules_for_tests__doc__.0) as *const i8
+        };
+        __t12
+    },
+    {
+        let mut __t13: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t13.ml_name =
+            (b"_override_multi_interp_extensions_check\0".as_ptr() as *mut i8) as *const i8;
+        __t13.ml_meth = Some(_imp__override_multi_interp_extensions_check);
+        __t13.ml_flags = 8i32;
+        __t13.ml_doc = unsafe {
+            core::ptr::addr_of!(_imp__override_multi_interp_extensions_check__doc__.0) as *const i8
+        };
+        __t13
+    },
+    {
+        let mut __t14: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t14.ml_name = (b"create_dynamic\0".as_ptr() as *mut i8) as *const i8;
+        __t14.ml_meth = unsafe {
+            core::mem::transmute::<
+                Option<unsafe extern "C-unwind" fn()>,
+                Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+            >(unsafe {
+                core::mem::transmute::<
+                    Option<
+                        unsafe extern "C-unwind" fn(
+                            *mut _object,
+                            *const *mut _object,
+                            i64,
+                        ) -> *mut _object,
+                    >,
+                    Option<unsafe extern "C-unwind" fn()>,
+                >(Some(_imp_create_dynamic))
+            })
+        };
+        __t14.ml_flags = 128i32;
+        __t14.ml_doc = unsafe { core::ptr::addr_of!(_imp_create_dynamic__doc__.0) as *const i8 };
+        __t14
+    },
+    {
+        let mut __t15: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t15.ml_name = (b"exec_dynamic\0".as_ptr() as *mut i8) as *const i8;
+        __t15.ml_meth = Some(_imp_exec_dynamic);
+        __t15.ml_flags = 8i32;
+        __t15.ml_doc = unsafe { core::ptr::addr_of!(_imp_exec_dynamic__doc__.0) as *const i8 };
+        __t15
+    },
+    {
+        let mut __t16: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t16.ml_name = (b"exec_builtin\0".as_ptr() as *mut i8) as *const i8;
+        __t16.ml_meth = Some(_imp_exec_builtin);
+        __t16.ml_flags = 8i32;
+        __t16.ml_doc = unsafe { core::ptr::addr_of!(_imp_exec_builtin__doc__.0) as *const i8 };
+        __t16
+    },
+    {
+        let mut __t17: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t17.ml_name = (b"_fix_co_filename\0".as_ptr() as *mut i8) as *const i8;
+        __t17.ml_meth = unsafe {
+            core::mem::transmute::<
+                Option<unsafe extern "C-unwind" fn()>,
+                Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+            >(unsafe {
+                core::mem::transmute::<
+                    Option<
+                        unsafe extern "C-unwind" fn(
+                            *mut _object,
+                            *const *mut _object,
+                            i64,
+                        ) -> *mut _object,
+                    >,
+                    Option<unsafe extern "C-unwind" fn()>,
+                >(Some(_imp__fix_co_filename))
+            })
+        };
+        __t17.ml_flags = 128i32;
+        __t17.ml_doc = unsafe { core::ptr::addr_of!(_imp__fix_co_filename__doc__.0) as *const i8 };
+        __t17
+    },
+    {
+        let mut __t18: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t18.ml_name = (b"source_hash\0".as_ptr() as *mut i8) as *const i8;
+        __t18.ml_meth = unsafe {
+            core::mem::transmute::<
+                Option<unsafe extern "C-unwind" fn()>,
+                Option<unsafe extern "C-unwind" fn(*mut _object, *mut _object) -> *mut _object>,
+            >(unsafe {
+                core::mem::transmute::<
+                    Option<
+                        unsafe extern "C-unwind" fn(
+                            *mut _object,
+                            *const *mut _object,
+                            i64,
+                            *mut _object,
+                        ) -> *mut _object,
+                    >,
+                    Option<unsafe extern "C-unwind" fn()>,
+                >(Some(_imp_source_hash))
+            })
+        };
+        __t18.ml_flags = 130i32;
+        __t18.ml_doc = unsafe { core::ptr::addr_of!(_imp_source_hash__doc__.0) as *const i8 };
+        __t18
+    },
+    {
+        let mut __t19: PyMethodDef = unsafe { core::mem::zeroed() };
+        __t19.ml_name = core::ptr::null::<i8>();
+        __t19.ml_meth = None;
+        __t19
+    },
+]);
+
+#[unsafe(link_section = ".text.slate_distinct.import.imp_module_exec")]
+extern "C-unwind" fn imp_module_exec(module: *mut _object) -> i32 {
+    let mode: *const i32 = (unsafe { (*_Py_GetConfig()).check_hash_pycs_mode }) as *const i32;
+    let pyc_mode: *mut _object =
+        unsafe { PyUnicode_FromWideChar(mode, 1i32.wrapping_neg() as i64) };
+    if (unsafe { PyModule_Add(module, c"check_hash_based_pycs".as_ptr(), pyc_mode) }) < 0 {
+        return 1i32.wrapping_neg();
+    }
+    if (unsafe {
+        PyModule_AddIntConstant(module, c"pyc_magic_number_token".as_ptr(), 168627755i64)
+    }) < 0
+    {
+        return 1i32.wrapping_neg();
+    }
+    0
+}
+
+static mut imp_slots: __SlateAlign16<[PyModuleDef_Slot; 4]> = __SlateAlign16([
+    {
+        let mut __t0: PyModuleDef_Slot = unsafe { core::mem::zeroed() };
+        __t0.slot = 2i32;
+        __t0.value = unsafe {
+            core::mem::transmute::<Option<unsafe extern "C-unwind" fn(*mut _object) -> i32>, *mut ()>(
+                Some(imp_module_exec),
+            )
+        };
+        __t0
+    },
+    {
+        let mut __t1: PyModuleDef_Slot = unsafe { core::mem::zeroed() };
+        __t1.slot = 3i32;
+        __t1.value = 2i32 as *mut ();
+        __t1
+    },
+    {
+        let mut __t2: PyModuleDef_Slot = unsafe { core::mem::zeroed() };
+        __t2.slot = 4i32;
+        __t2.value = 1i32 as *mut ();
+        __t2
+    },
+    {
+        let mut __t3: PyModuleDef_Slot = unsafe { core::mem::zeroed() };
+        __t3.slot = 0i32;
+        __t3.value = core::ptr::null_mut::<()>();
+        __t3
+    },
+]);
+
+static mut imp_module: PyModuleDef = {
+    let mut __t0: PyModuleDef = unsafe { core::mem::zeroed() };
+    __t0.m_base = PyModuleDef_Base {
+        ob_base: _object {
+            __slate_anon_0: __SlateRecord_object_h_122 {
+                ob_refcnt_full: 1407378104778752i64,
+            },
+            ob_type: core::ptr::null_mut::<_typeobject>(),
+        },
+        m_init: None,
+        m_index: 0i64,
+        m_copy: core::ptr::null_mut::<_object>(),
+    };
+    __t0.m_name = (b"_imp\0".as_ptr() as *mut i8) as *const i8;
+    __t0.m_doc = unsafe { core::ptr::addr_of!(doc_imp.0) as *const i8 };
+    __t0.m_size = 0i64;
+    __t0.m_methods = unsafe { core::ptr::addr_of_mut!(imp_methods.0) as *mut PyMethodDef };
+    __t0.m_slots = unsafe { core::ptr::addr_of_mut!(imp_slots.0) as *mut PyModuleDef_Slot };
+    __t0
+};
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".text.slate_distinct.import.PyInit__imp")]
+extern "C-unwind" fn PyInit__imp() -> *mut _object {
+    unsafe { PyModuleDef_Init(core::ptr::addr_of_mut!(imp_module)) }
+}

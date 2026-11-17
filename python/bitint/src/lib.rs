@@ -1,0 +1,1941 @@
+#![no_std]
+pub use aligned::{A1, A2, A4, A8, A16, Alignment};
+use core::cmp::Ordering;
+use core::fmt;
+use core::hash::{Hash, Hasher};
+use core::ops::{
+    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
+    Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
+};
+
+pub trait ShiftAmount {
+    fn shift_amount(self) -> usize;
+}
+
+macro_rules! shift_amount_for_int {
+    ($($ty:ty),* $(,)?) => {$(
+        impl ShiftAmount for $ty {
+            fn shift_amount(self) -> usize {
+                usize::try_from(self).unwrap_or(usize::MAX)
+            }
+        }
+    )*};
+}
+
+shift_amount_for_int!(
+    i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize
+);
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> ShiftAmount
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn shift_amount(self) -> usize {
+        usize::try_from(self.to_u128()).unwrap_or(usize::MAX)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> ShiftAmount
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn shift_amount(self) -> usize {
+        usize::try_from(self.to_i128()).unwrap_or(usize::MAX)
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct BUint<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment = A1> {
+    _align: [A; 0],
+    bytes: [u8; BYTES],
+}
+
+macro_rules! byte_traits {
+    ($name:ident) => {
+        impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> PartialEq
+            for $name<BITS, LIMBS, BYTES, A>
+        {
+            fn eq(&self, other: &Self) -> bool {
+                self.bytes == other.bytes
+            }
+        }
+
+        impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Eq
+            for $name<BITS, LIMBS, BYTES, A>
+        {
+        }
+
+        impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Hash
+            for $name<BITS, LIMBS, BYTES, A>
+        {
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                self.bytes.hash(state);
+            }
+        }
+
+        impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> fmt::Debug
+            for $name<BITS, LIMBS, BYTES, A>
+        {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct(stringify!($name))
+                    .field("bytes", &self.bytes)
+                    .finish()
+            }
+        }
+    };
+}
+
+byte_traits!(BUint);
+byte_traits!(BInt);
+
+const fn read_bit(bytes: &[u8], index: usize) -> bool {
+    bytes[index / 8] >> (index % 8) & 1 == 1
+}
+
+const fn write_bit(bytes: &mut [u8], index: usize, value: bool) {
+    let mask = 1u8 << (index % 8);
+    if value {
+        bytes[index / 8] |= mask;
+    } else {
+        bytes[index / 8] &= !mask;
+    }
+}
+
+pub const fn load_bits(bytes: &[u8], start: usize, width: usize) -> u128 {
+    let mut value = 0u128;
+    let mut offset = 0;
+    while offset < width {
+        if read_bit(bytes, start + offset) {
+            value |= 1u128 << offset;
+        }
+        offset += 1;
+    }
+    value
+}
+
+pub const fn load_bits_signed(bytes: &[u8], start: usize, width: usize) -> i128 {
+    let value = load_bits(bytes, start, width);
+    if width < 128 && width > 0 && value >> (width - 1) & 1 == 1 {
+        (value | (u128::MAX << width)) as i128
+    } else {
+        value as i128
+    }
+}
+
+pub const fn store_bits(bytes: &mut [u8], start: usize, width: usize, value: u128) {
+    let mut offset = 0;
+    while offset < width {
+        write_bit(bytes, start + offset, value >> offset & 1 == 1);
+        offset += 1;
+    }
+}
+
+const fn load_wide<const BYTES: usize>(bytes: &[u8], start: usize, width: usize, signed: bool) -> [u8; BYTES] {
+    let mut out = [0u8; BYTES];
+    let mut offset = 0;
+    while offset < width {
+        write_bit(&mut out, offset, read_bit(bytes, start + offset));
+        offset += 1;
+    }
+    if signed && width > 0 && read_bit(bytes, start + width - 1) {
+        while offset < BYTES * 8 {
+            write_bit(&mut out, offset, true);
+            offset += 1;
+        }
+    }
+    out
+}
+
+const fn store_wide(value: &[u8], bytes: &mut [u8], start: usize, width: usize) {
+    let mut offset = 0;
+    while offset < width {
+        write_bit(bytes, start + offset, read_bit(value, offset));
+        offset += 1;
+    }
+}
+
+const fn f80_bytes_to_bits(bytes: [u8; 10]) -> u128 {
+    let mut wide = [0u8; 16];
+    let mut i = 0;
+    while i < 10 {
+        wide[i] = bytes[i];
+        i += 1;
+    }
+    u128::from_le_bytes(wide)
+}
+
+const fn bytes_to_limbs<const LIMBS: usize, const BYTES: usize>(
+    bytes: &[u8; BYTES],
+) -> [u64; LIMBS] {
+    let mut limbs = [0u64; LIMBS];
+    let mut i = 0;
+    while i < BYTES {
+        limbs[i / 8] |= (bytes[i] as u64) << ((i % 8) * 8);
+        i += 1;
+    }
+    limbs
+}
+
+const fn limbs_to_bytes<const LIMBS: usize, const BYTES: usize>(
+    limbs: &[u64; LIMBS],
+) -> [u8; BYTES] {
+    let mut bytes = [0u8; BYTES];
+    let mut i = 0;
+    while i < BYTES {
+        bytes[i] = (limbs[i / 8] >> ((i % 8) * 8)) as u8;
+        i += 1;
+    }
+    bytes
+}
+
+const fn sign_extend<const BITS: usize, const BYTES: usize>(mut bytes: [u8; BYTES]) -> [u8; BYTES] {
+    if bytes[(BITS - 1) / 8] & (1 << ((BITS - 1) % 8)) != 0 {
+        let mut bit = BITS;
+        while bit < BYTES * 8 {
+            bytes[bit / 8] |= 1 << (bit % 8);
+            bit += 1;
+        }
+    }
+    bytes
+}
+
+const fn cast_bytes<const DBITS: usize, const DBYTES: usize, const SBITS: usize, const SBYTES: usize>(
+    bytes: &[u8; SBYTES],
+    signed: bool,
+) -> [u8; DBYTES] {
+    let sign = signed && (bytes[(SBITS - 1) / 8] & (1 << ((SBITS - 1) % 8))) != 0;
+    let mut out = [0; DBYTES];
+    let mut i = 0;
+    while i < DBYTES && i < SBYTES {
+        out[i] = bytes[i];
+        i += 1;
+    }
+    if sign {
+        let mut bit = SBITS;
+        while bit < DBITS {
+            out[bit / 8] |= 1 << (bit % 8);
+            bit += 1;
+        }
+    }
+    let used_bytes = DBITS.div_ceil(8);
+    let mut i = used_bytes;
+    while i < DBYTES {
+        out[i] = 0;
+        i += 1;
+    }
+    if DBITS % 8 != 0 {
+        out[used_bytes - 1] &= (1 << (DBITS % 8)) - 1;
+    }
+    out
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BUint<BITS, LIMBS, BYTES, A> {
+    pub const ZERO: Self = Self {
+        _align: [],
+        bytes: [0; BYTES],
+    };
+    pub const ONE: Self = Self::from_limbs(BUintLimbs::<BITS, LIMBS>::ONE);
+
+    const fn from_limbs(v: BUintLimbs<BITS, LIMBS>) -> Self {
+        Self {
+            _align: [],
+            bytes: limbs_to_bytes(&v.limbs),
+        }
+    }
+
+    const fn to_limbs(self) -> BUintLimbs<BITS, LIMBS> {
+        BUintLimbs::masked(bytes_to_limbs(&self.bytes))
+    }
+
+    pub const fn from_i128(v: i128) -> Self {
+        Self::from_limbs(BUintLimbs::from_i128(v))
+    }
+
+    pub const fn from_u128(v: u128) -> Self {
+        Self::from_limbs(BUintLimbs::from_u128(v))
+    }
+
+    pub const fn from_buint<const SBITS: usize, const SLIMBS: usize, const SBYTES: usize, SA: Alignment>(
+        v: BUint<SBITS, SLIMBS, SBYTES, SA>,
+    ) -> Self {
+        Self {
+            _align: [],
+            bytes: cast_bytes::<BITS, BYTES, SBITS, SBYTES>(&v.bytes, false),
+        }
+    }
+
+    pub const fn from_bint<const SBITS: usize, const SLIMBS: usize, const SBYTES: usize, SA: Alignment>(
+        v: BInt<SBITS, SLIMBS, SBYTES, SA>,
+    ) -> Self {
+        Self {
+            _align: [],
+            bytes: cast_bytes::<BITS, BYTES, SBITS, SBYTES>(&v.bytes, true),
+        }
+    }
+
+    pub const fn from_le_bytes<const SBITS: usize, const SBYTES: usize>(
+        bytes: [u8; SBYTES],
+    ) -> Self {
+        Self {
+            _align: [],
+            bytes: cast_bytes::<BITS, BYTES, SBITS, SBYTES>(&bytes, false),
+        }
+    }
+
+    pub const fn to_le_bytes<const DBYTES: usize>(self) -> [u8; DBYTES] {
+        cast_bytes::<BITS, DBYTES, BITS, BYTES>(&self.bytes, false)
+    }
+
+    pub const fn from_bit_range(bytes: &[u8], start: usize, width: usize) -> Self {
+        Self {
+            _align: [],
+            bytes: load_wide::<BYTES>(bytes, start, width, false),
+        }
+    }
+
+    pub const fn write_bit_range(self, bytes: &mut [u8], start: usize, width: usize) {
+        store_wide(&self.bytes, bytes, start, width);
+    }
+
+    pub const fn count_ones(self) -> u32 {
+        self.to_limbs().count_ones()
+    }
+
+    pub const fn leading_zeros(self) -> u32 {
+        self.to_limbs().leading_zeros()
+    }
+
+    pub const fn trailing_zeros(self) -> u32 {
+        self.to_limbs().trailing_zeros()
+    }
+
+    pub const fn to_ieee_bits(self, frac_bits: u32, exp_bits: u32, explicit: bool) -> u128 {
+        self.to_limbs()
+            .magnitude_to_ieee(false, frac_bits, exp_bits, explicit)
+    }
+
+    pub const fn from_ieee_bits(bits: u128, frac_bits: u32, exp_bits: u32, explicit: bool) -> Self {
+        let (negative, magnitude) =
+            BUintLimbs::<BITS, LIMBS>::magnitude_from_ieee(bits, frac_bits, exp_bits, explicit);
+        Self::from_limbs(if negative {
+            magnitude.wrapping_neg()
+        } else {
+            magnitude
+        })
+    }
+
+    pub const fn to_f80_bytes(self) -> [u8; 10] {
+        let bits = self.to_ieee_bits(63, 15, true).to_le_bytes();
+        [
+            bits[0], bits[1], bits[2], bits[3], bits[4], bits[5], bits[6], bits[7], bits[8],
+            bits[9],
+        ]
+    }
+
+    pub const fn from_f80_bytes(bytes: [u8; 10]) -> Self {
+        Self::from_ieee_bits(f80_bytes_to_bits(bytes), 63, 15, true)
+    }
+
+    pub const fn to_f64(self) -> f64 {
+        self.to_limbs().magnitude_to_f64()
+    }
+
+    pub const fn to_f32(self) -> f32 {
+        self.to_limbs().magnitude_to_f32()
+    }
+
+    pub const fn from_f64(d: f64) -> Self {
+        let magnitude = BUintLimbs::<BITS, LIMBS>::magnitude_from_f64(d);
+        Self::from_limbs(if d.is_sign_negative() {
+            magnitude.wrapping_neg()
+        } else {
+            magnitude
+        })
+    }
+
+    pub const fn from_f32(f: f32) -> Self {
+        Self::from_f64(f as f64)
+    }
+
+    pub const fn to_u128(self) -> u128 {
+        self.to_limbs().to_u128()
+    }
+
+    pub const fn from_decimal_str(s: &str) -> Self {
+        Self::from_limbs(BUintLimbs::from_decimal_str(s))
+    }
+
+    pub const fn wrapping_add(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().wrapping_add(rhs.to_limbs()))
+    }
+
+    pub const fn wrapping_neg(self) -> Self {
+        Self::from_limbs(self.to_limbs().wrapping_neg())
+    }
+
+    pub const fn wrapping_sub(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().wrapping_sub(rhs.to_limbs()))
+    }
+
+    pub const fn wrapping_mul(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().wrapping_mul(rhs.to_limbs()))
+    }
+
+    pub fn overflowing_add(self, rhs: Self) -> (Self, bool) {
+        let out = self.wrapping_add(rhs);
+        (out, out < self)
+    }
+
+    pub fn overflowing_sub(self, rhs: Self) -> (Self, bool) {
+        (self.wrapping_sub(rhs), self < rhs)
+    }
+
+    pub fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
+        if self == Self::ZERO || rhs == Self::ZERO {
+            return (Self::ZERO, false);
+        }
+        let out = self.wrapping_mul(rhs);
+        (out, out.wrapping_div(self) != rhs)
+    }
+
+    pub fn saturating_add(self, rhs: Self) -> Self {
+        let (out, overflow) = self.overflowing_add(rhs);
+        if overflow { !Self::ZERO } else { out }
+    }
+
+    pub fn saturating_sub(self, rhs: Self) -> Self {
+        let (out, overflow) = self.overflowing_sub(rhs);
+        if overflow { Self::ZERO } else { out }
+    }
+
+    pub const fn wrapping_div(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().wrapping_div(rhs.to_limbs()))
+    }
+
+    pub const fn wrapping_rem(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().wrapping_rem(rhs.to_limbs()))
+    }
+
+    pub const fn wrapping_div_rem(self, rhs: Self) -> (Self, Self) {
+        let (q, r) = self.to_limbs().wrapping_div_rem(rhs.to_limbs());
+        (Self::from_limbs(q), Self::from_limbs(r))
+    }
+
+    pub const fn bitand_bits(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().bitand_bits(rhs.to_limbs()))
+    }
+
+    pub const fn bitor_bits(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().bitor_bits(rhs.to_limbs()))
+    }
+
+    pub const fn bitxor_bits(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().bitxor_bits(rhs.to_limbs()))
+    }
+
+    pub const fn bitnot(self) -> Self {
+        Self::from_limbs(self.to_limbs().bitnot())
+    }
+
+    pub const fn shl_bits(self, shift: usize) -> Self {
+        Self::from_limbs(self.to_limbs().shl_bits(shift))
+    }
+
+    pub const fn shr_bits(self, shift: usize) -> Self {
+        Self::from_limbs(self.to_limbs().shr_bits(shift))
+    }
+
+    pub const fn rotate_left_bits(self, shift: u32) -> Self {
+        self.shl_bits(shift as usize)
+            .bitor_bits(self.shr_bits((BITS - shift as usize) % BITS))
+    }
+
+    pub const fn rotate_right_bits(self, shift: u32) -> Self {
+        self.shr_bits(shift as usize)
+            .bitor_bits(self.shl_bits((BITS - shift as usize) % BITS))
+    }
+
+    pub const fn rem_u32(self, modulus: u32) -> u32 {
+        self.to_limbs().rem_u32(modulus)
+    }
+
+    pub const fn compare(self, rhs: Self) -> i32 {
+        match self.to_limbs().cmp_magnitude(&rhs.to_limbs()) {
+            Ordering::Less => -1,
+            Ordering::Equal => 0,
+            Ordering::Greater => 1,
+        }
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Add for BUint<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        self.wrapping_add(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Sub for BUint<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        self.wrapping_sub(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Mul for BUint<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self {
+        self.wrapping_mul(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Neg for BUint<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn neg(self) -> Self {
+        self.wrapping_neg()
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Div for BUint<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self::Output {
+        self.wrapping_div(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Rem for BUint<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn rem(self, rhs: Self) -> Self::Output {
+        self.wrapping_rem(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> AddAssign
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn add_assign(&mut self, rhs: Self) {
+        *self = (*self).wrapping_add(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> SubAssign
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = (*self).wrapping_sub(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> MulAssign
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = (*self).wrapping_mul(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> DivAssign
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn div_assign(&mut self, rhs: Self) {
+        *self = (*self).wrapping_div(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> RemAssign
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn rem_assign(&mut self, rhs: Self) {
+        *self = (*self).wrapping_rem(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> PartialOrd
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Ord for BUint<BITS, LIMBS, BYTES, A> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.to_limbs().cmp_magnitude(&other.to_limbs())
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Not for BUint<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn not(self) -> Self::Output {
+        self.bitnot()
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitAnd
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self::Output {
+        self.bitand_bits(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitOr
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        self.bitor_bits(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitXor
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    type Output = Self;
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        self.bitxor_bits(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment, S: ShiftAmount> Shl<S>
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    type Output = Self;
+    fn shl(self, rhs: S) -> Self::Output {
+        self.shl_bits(rhs.shift_amount())
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment, S: ShiftAmount> Shr<S>
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    type Output = Self;
+    fn shr(self, rhs: S) -> Self::Output {
+        self.shr_bits(rhs.shift_amount())
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitAndAssign
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn bitand_assign(&mut self, rhs: Self) {
+        *self = (*self).bitand_bits(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitOrAssign
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = (*self).bitor_bits(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitXorAssign
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn bitxor_assign(&mut self, rhs: Self) {
+        *self = (*self).bitxor_bits(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment, S: ShiftAmount> ShlAssign<S>
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn shl_assign(&mut self, rhs: S) {
+        *self = (*self).shl_bits(rhs.shift_amount());
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment, S: ShiftAmount> ShrAssign<S>
+    for BUint<BITS, LIMBS, BYTES, A>
+{
+    fn shr_assign(&mut self, rhs: S) {
+        *self = (*self).shr_bits(rhs.shift_amount());
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct BInt<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment = A1> {
+    _align: [A; 0],
+    bytes: [u8; BYTES],
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BInt<BITS, LIMBS, BYTES, A> {
+    pub const ZERO: Self = Self {
+        _align: [],
+        bytes: [0; BYTES],
+    };
+
+    const fn from_limbs(v: BIntLimbs<BITS, LIMBS>) -> Self {
+        Self {
+            _align: [],
+            bytes: sign_extend::<BITS, BYTES>(limbs_to_bytes(&v.bits.limbs)),
+        }
+    }
+
+    const fn to_limbs(self) -> BIntLimbs<BITS, LIMBS> {
+        BIntLimbs {
+            bits: BUintLimbs::masked(bytes_to_limbs(&self.bytes)),
+        }
+    }
+
+    pub const fn from_i128(v: i128) -> Self {
+        Self::from_limbs(BIntLimbs::from_i128(v))
+    }
+
+    pub const fn from_u128(v: u128) -> Self {
+        Self::from_limbs(BIntLimbs::from_u128(v))
+    }
+
+    pub const fn from_buint<const SBITS: usize, const SLIMBS: usize, const SBYTES: usize, SA: Alignment>(
+        v: BUint<SBITS, SLIMBS, SBYTES, SA>,
+    ) -> Self {
+        Self {
+            _align: [],
+            bytes: sign_extend::<BITS, BYTES>(cast_bytes::<BITS, BYTES, SBITS, SBYTES>(
+                &v.bytes, false,
+            )),
+        }
+    }
+
+    pub const fn from_le_bytes<const SBITS: usize, const SBYTES: usize>(
+        bytes: [u8; SBYTES],
+    ) -> Self {
+        Self {
+            _align: [],
+            bytes: sign_extend::<BITS, BYTES>(cast_bytes::<BITS, BYTES, SBITS, SBYTES>(
+                &bytes, true,
+            )),
+        }
+    }
+
+    pub const fn to_le_bytes<const DBYTES: usize>(self) -> [u8; DBYTES] {
+        cast_bytes::<BITS, DBYTES, BITS, BYTES>(&self.bytes, false)
+    }
+
+    pub const fn from_bint<const SBITS: usize, const SLIMBS: usize, const SBYTES: usize, SA: Alignment>(
+        v: BInt<SBITS, SLIMBS, SBYTES, SA>,
+    ) -> Self {
+        Self {
+            _align: [],
+            bytes: sign_extend::<BITS, BYTES>(cast_bytes::<BITS, BYTES, SBITS, SBYTES>(
+                &v.bytes, true,
+            )),
+        }
+    }
+
+    pub const fn to_i128(self) -> i128 {
+        self.to_limbs().to_i128()
+    }
+
+    pub const fn from_bit_range(bytes: &[u8], start: usize, width: usize) -> Self {
+        Self {
+            _align: [],
+            bytes: load_wide::<BYTES>(bytes, start, width, true),
+        }
+    }
+
+    pub const fn write_bit_range(self, bytes: &mut [u8], start: usize, width: usize) {
+        store_wide(&self.bytes, bytes, start, width);
+    }
+
+    pub const fn count_ones(self) -> u32 {
+        self.to_limbs().bits.count_ones()
+    }
+
+    pub const fn leading_zeros(self) -> u32 {
+        self.to_limbs().bits.leading_zeros()
+    }
+
+    pub const fn trailing_zeros(self) -> u32 {
+        self.to_limbs().bits.trailing_zeros()
+    }
+
+    pub const fn redundant_sign_bits(self) -> u32 {
+        let limbs = self.to_limbs();
+        let pattern = if limbs.is_negative() {
+            limbs.bits.bitnot()
+        } else {
+            limbs.bits
+        };
+        pattern.leading_zeros() - 1
+    }
+
+    pub const fn to_ieee_bits(self, frac_bits: u32, exp_bits: u32, explicit: bool) -> u128 {
+        self.to_limbs().to_ieee(frac_bits, exp_bits, explicit)
+    }
+
+    pub const fn from_ieee_bits(bits: u128, frac_bits: u32, exp_bits: u32, explicit: bool) -> Self {
+        Self::from_limbs(BIntLimbs::<BITS, LIMBS>::from_ieee(
+            bits, frac_bits, exp_bits, explicit,
+        ))
+    }
+
+    pub const fn to_f80_bytes(self) -> [u8; 10] {
+        let bits = self.to_ieee_bits(63, 15, true).to_le_bytes();
+        [
+            bits[0], bits[1], bits[2], bits[3], bits[4], bits[5], bits[6], bits[7], bits[8],
+            bits[9],
+        ]
+    }
+
+    pub const fn from_f80_bytes(bytes: [u8; 10]) -> Self {
+        Self::from_ieee_bits(f80_bytes_to_bits(bytes), 63, 15, true)
+    }
+
+    pub const fn to_f64(self) -> f64 {
+        self.to_limbs().to_f64()
+    }
+
+    pub const fn to_f32(self) -> f32 {
+        self.to_limbs().to_f32()
+    }
+
+    pub const fn from_f64(d: f64) -> Self {
+        Self::from_limbs(BIntLimbs::<BITS, LIMBS>::from_f64(d))
+    }
+
+    pub const fn from_f32(f: f32) -> Self {
+        Self::from_f64(f as f64)
+    }
+
+    pub const fn to_u128(self) -> u128 {
+        self.to_limbs().to_u128()
+    }
+
+    pub const fn from_decimal_str(s: &str) -> Self {
+        Self::from_limbs(BIntLimbs::from_decimal_str(s))
+    }
+
+    pub const fn wrapping_add(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().wrapping_add(rhs.to_limbs()))
+    }
+
+    pub const fn wrapping_sub(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().wrapping_sub(rhs.to_limbs()))
+    }
+
+    pub const fn wrapping_mul(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().wrapping_mul(rhs.to_limbs()))
+    }
+
+    fn min_value() -> Self {
+        let sign_limb = BIntLimbs::<BITS, LIMBS>::SIGN_LIMB;
+        let sign_bit = BIntLimbs::<BITS, LIMBS>::SIGN_BIT;
+        let mut limbs = [0u64; LIMBS];
+        if sign_limb < LIMBS {
+            limbs[sign_limb] = 1u64 << sign_bit;
+        }
+        Self::from_limbs(BIntLimbs {
+            bits: BUintLimbs::masked(limbs),
+        })
+    }
+
+    pub fn overflowing_add(self, rhs: Self) -> (Self, bool) {
+        let out = self.wrapping_add(rhs);
+        let lhs_neg = self.to_limbs().is_negative();
+        let overflow =
+            lhs_neg == rhs.to_limbs().is_negative() && lhs_neg != out.to_limbs().is_negative();
+        (out, overflow)
+    }
+
+    pub fn overflowing_sub(self, rhs: Self) -> (Self, bool) {
+        let out = self.wrapping_sub(rhs);
+        let lhs_neg = self.to_limbs().is_negative();
+        let overflow =
+            lhs_neg != rhs.to_limbs().is_negative() && lhs_neg != out.to_limbs().is_negative();
+        (out, overflow)
+    }
+
+    pub fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
+        if self == Self::ZERO || rhs == Self::ZERO {
+            return (Self::ZERO, false);
+        }
+        let out = self.wrapping_mul(rhs);
+        if self == Self::from_i128(-1) {
+            return (out, rhs == Self::min_value());
+        }
+        (out, out.wrapping_div(self) != rhs)
+    }
+
+    fn saturated_bound(self) -> Self {
+        if self.to_limbs().is_negative() {
+            Self::min_value()
+        } else {
+            !Self::min_value()
+        }
+    }
+
+    pub fn saturating_add(self, rhs: Self) -> Self {
+        let (out, overflow) = self.overflowing_add(rhs);
+        if overflow {
+            self.saturated_bound()
+        } else {
+            out
+        }
+    }
+
+    pub fn saturating_sub(self, rhs: Self) -> Self {
+        let (out, overflow) = self.overflowing_sub(rhs);
+        if overflow {
+            self.saturated_bound()
+        } else {
+            out
+        }
+    }
+
+    pub const fn wrapping_neg(self) -> Self {
+        Self::from_limbs(self.to_limbs().wrapping_neg())
+    }
+
+    pub const fn rem_euclid_u32(self, modulus: u32) -> u32 {
+        let limbs = self.to_limbs();
+        if limbs.is_negative() {
+            let rem = limbs.wrapping_neg().bits.rem_u32(modulus);
+            (modulus - rem) % modulus
+        } else {
+            limbs.bits.rem_u32(modulus)
+        }
+    }
+
+    pub const fn wrapping_div_rem(self, rhs: Self) -> (Self, Self) {
+        let (q, r) = self.to_limbs().wrapping_div_rem(rhs.to_limbs());
+        (Self::from_limbs(q), Self::from_limbs(r))
+    }
+
+    pub const fn wrapping_div(self, rhs: Self) -> Self {
+        self.wrapping_div_rem(rhs).0
+    }
+
+    pub const fn wrapping_rem(self, rhs: Self) -> Self {
+        self.wrapping_div_rem(rhs).1
+    }
+
+    pub const fn bitand_bits(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().bitand_bits(rhs.to_limbs()))
+    }
+
+    pub const fn bitor_bits(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().bitor_bits(rhs.to_limbs()))
+    }
+
+    pub const fn bitxor_bits(self, rhs: Self) -> Self {
+        Self::from_limbs(self.to_limbs().bitxor_bits(rhs.to_limbs()))
+    }
+
+    pub const fn bitnot(self) -> Self {
+        Self::from_limbs(self.to_limbs().bitnot())
+    }
+
+    pub const fn shl_bits(self, shift: usize) -> Self {
+        Self::from_limbs(self.to_limbs().shl_bits(shift))
+    }
+
+    pub const fn shr_bits(self, shift: usize) -> Self {
+        Self::from_limbs(self.to_limbs().shr_bits(shift))
+    }
+
+    pub const fn compare(self, rhs: Self) -> i32 {
+        match self.to_limbs().cmp(&rhs.to_limbs()) {
+            Ordering::Less => -1,
+            Ordering::Equal => 0,
+            Ordering::Greater => 1,
+        }
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Add for BInt<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        self.wrapping_add(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Sub for BInt<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        self.wrapping_sub(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Mul for BInt<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self {
+        self.wrapping_mul(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Neg for BInt<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn neg(self) -> Self {
+        self.wrapping_neg()
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> PartialOrd
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Ord for BInt<BITS, LIMBS, BYTES, A> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.to_limbs().cmp(&other.to_limbs())
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Div for BInt<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self {
+        self.wrapping_div(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Rem for BInt<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn rem(self, rhs: Self) -> Self {
+        self.wrapping_rem(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitAnd
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        self.bitand_bits(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitOr for BInt<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        self.bitor_bits(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitXor
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    type Output = Self;
+    fn bitxor(self, rhs: Self) -> Self {
+        self.bitxor_bits(rhs)
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> AddAssign
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn add_assign(&mut self, rhs: Self) {
+        *self = (*self).wrapping_add(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> SubAssign
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = (*self).wrapping_sub(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> MulAssign
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = (*self).wrapping_mul(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> DivAssign
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn div_assign(&mut self, rhs: Self) {
+        *self = (*self).wrapping_div(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> RemAssign
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn rem_assign(&mut self, rhs: Self) {
+        *self = (*self).wrapping_rem(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitAndAssign
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn bitand_assign(&mut self, rhs: Self) {
+        *self = (*self).bitand_bits(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitOrAssign
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = (*self).bitor_bits(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> BitXorAssign
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn bitxor_assign(&mut self, rhs: Self) {
+        *self = (*self).bitxor_bits(rhs);
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment> Not for BInt<BITS, LIMBS, BYTES, A> {
+    type Output = Self;
+    fn not(self) -> Self::Output {
+        self.bitnot()
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment, S: ShiftAmount> Shl<S>
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    type Output = Self;
+    fn shl(self, rhs: S) -> Self::Output {
+        self.shl_bits(rhs.shift_amount())
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment, S: ShiftAmount> Shr<S>
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    type Output = Self;
+    fn shr(self, rhs: S) -> Self::Output {
+        self.shr_bits(rhs.shift_amount())
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment, S: ShiftAmount> ShlAssign<S>
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn shl_assign(&mut self, rhs: S) {
+        *self = (*self).shl_bits(rhs.shift_amount());
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize, const BYTES: usize, A: Alignment, S: ShiftAmount> ShrAssign<S>
+    for BInt<BITS, LIMBS, BYTES, A>
+{
+    fn shr_assign(&mut self, rhs: S) {
+        *self = (*self).shr_bits(rhs.shift_amount());
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct BUintLimbs<const BITS: usize, const LIMBS: usize> {
+    limbs: [u64; LIMBS],
+}
+
+impl<const BITS: usize, const LIMBS: usize> BUintLimbs<BITS, LIMBS> {
+    const fn rem_u32(&self, modulus: u32) -> u32 {
+        let mut rem: u128 = 0;
+        let mut i = LIMBS;
+        while i > 0 {
+            i -= 1;
+            rem = ((rem << 64) | self.limbs[i] as u128) % modulus as u128;
+        }
+        rem as u32
+    }
+
+    const TOP_BITS: u32 = (BITS % 64) as u32;
+    const TOP_MASK: u64 = if Self::TOP_BITS == 0 {
+        u64::MAX
+    } else {
+        (1u64 << Self::TOP_BITS) - 1
+    };
+
+    const ZERO: Self = Self { limbs: [0; LIMBS] };
+    const ONE: Self = Self::from_low_limb(1);
+
+    const fn from_low_limb(low: u64) -> Self {
+        let mut limbs = [0u64; LIMBS];
+        if LIMBS > 0 {
+            limbs[0] = low;
+        }
+        Self::masked(limbs)
+    }
+
+    const fn masked(mut limbs: [u64; LIMBS]) -> Self {
+        if LIMBS > 0 {
+            limbs[LIMBS - 1] &= Self::TOP_MASK;
+        }
+        Self { limbs }
+    }
+
+    const fn from_i128(v: i128) -> Self {
+        let fill: u64 = if v < 0 { u64::MAX } else { 0 };
+        let mut limbs = [fill; LIMBS];
+        let bits = v as u128;
+        if LIMBS > 0 {
+            limbs[0] = bits as u64;
+        }
+        if LIMBS > 1 {
+            limbs[1] = (bits >> 64) as u64;
+        }
+        Self::masked(limbs)
+    }
+
+    const fn from_u128(v: u128) -> Self {
+        let mut limbs = [0; LIMBS];
+        if LIMBS > 0 {
+            limbs[0] = v as u64;
+        }
+        if LIMBS > 1 {
+            limbs[1] = (v >> 64) as u64;
+        }
+        Self::masked(limbs)
+    }
+
+    const fn to_u128(self) -> u128 {
+        let mut value = 0;
+        if LIMBS > 0 {
+            value = self.limbs[0] as u128;
+        }
+        if LIMBS > 1 {
+            value |= (self.limbs[1] as u128) << 64;
+        }
+        value
+    }
+
+    const fn from_decimal_str(s: &str) -> Self {
+        let bytes = s.as_bytes();
+        let ten = Self::from_low_limb(10);
+        let mut acc = Self::ZERO;
+        let mut i = 0;
+        while i < bytes.len() {
+            let digit = Self::from_low_limb((bytes[i] - b'0') as u64);
+            acc = acc.wrapping_mul(ten).wrapping_add(digit);
+            i += 1;
+        }
+        acc
+    }
+
+    const fn wrapping_add(self, rhs: Self) -> Self {
+        let mut out = [0u64; LIMBS];
+        let mut carry: u128 = 0;
+        let mut i = 0;
+        while i < LIMBS {
+            let sum = self.limbs[i] as u128 + rhs.limbs[i] as u128 + carry;
+            out[i] = sum as u64;
+            carry = sum >> 64;
+            i += 1;
+        }
+        Self::masked(out)
+    }
+
+    const fn wrapping_neg(self) -> Self {
+        let mut inv = [0u64; LIMBS];
+        let mut i = 0;
+        while i < LIMBS {
+            inv[i] = !self.limbs[i];
+            i += 1;
+        }
+        Self { limbs: inv }.wrapping_add(Self::ONE)
+    }
+
+    const fn wrapping_sub(self, rhs: Self) -> Self {
+        self.wrapping_add(rhs.wrapping_neg())
+    }
+
+    const fn wrapping_mul(self, rhs: Self) -> Self {
+        let mut out = [0u64; LIMBS];
+        let mut i = 0;
+        while i < LIMBS {
+            let mut carry: u128 = 0;
+            let mut j = 0;
+            while i + j < LIMBS {
+                let idx = i + j;
+                let prod =
+                    (self.limbs[i] as u128) * (rhs.limbs[j] as u128) + out[idx] as u128 + carry;
+                out[idx] = prod as u64;
+                carry = prod >> 64;
+                j += 1;
+            }
+            i += 1;
+        }
+        Self::masked(out)
+    }
+
+    const fn cmp_magnitude(&self, other: &Self) -> Ordering {
+        let mut i = LIMBS;
+        while i > 0 {
+            i -= 1;
+            if self.limbs[i] != other.limbs[i] {
+                return if self.limbs[i] < other.limbs[i] {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                };
+            }
+        }
+        Ordering::Equal
+    }
+
+    const fn is_zero(&self) -> bool {
+        let mut i = 0;
+        while i < LIMBS {
+            if self.limbs[i] != 0 {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+
+    const fn count_ones(&self) -> u32 {
+        let mut total = 0;
+        let mut i = 0;
+        while i < LIMBS {
+            total += self.limbs[i].count_ones();
+            i += 1;
+        }
+        total
+    }
+
+    const fn leading_zeros(&self) -> u32 {
+        (BITS - self.bit_len()) as u32
+    }
+
+    const fn trailing_zeros(&self) -> u32 {
+        let mut i = 0;
+        while i < LIMBS {
+            if self.limbs[i] != 0 {
+                return (i * 64) as u32 + self.limbs[i].trailing_zeros();
+            }
+            i += 1;
+        }
+        BITS as u32
+    }
+
+    const fn has_bits_below(&self, count: usize) -> bool {
+        let mut i = 0;
+        while i < LIMBS && i * 64 < count {
+            let remaining = count - i * 64;
+            let mask = if remaining >= 64 {
+                u64::MAX
+            } else {
+                (1u64 << remaining) - 1
+            };
+            if self.limbs[i] & mask != 0 {
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    const fn top64_sticky(&self) -> (u64, usize) {
+        let len = self.bit_len();
+        if len <= 64 {
+            return (if LIMBS > 0 { self.limbs[0] } else { 0 }, 0);
+        }
+        let shift = len - 64;
+        let top = self.shr_bits(shift).limbs[0];
+        (top | self.has_bits_below(shift) as u64, shift)
+    }
+
+    const fn magnitude_to_f64(&self) -> f64 {
+        let (top, shift) = self.top64_sticky();
+        let scale = if shift > 1023 {
+            f64::INFINITY
+        } else {
+            f64::from_bits((1023 + shift as u64) << 52)
+        };
+        top as f64 * scale
+    }
+
+    const fn magnitude_to_f32(&self) -> f32 {
+        let (top, shift) = self.top64_sticky();
+        let scale = if shift > 127 {
+            f32::INFINITY
+        } else {
+            f32::from_bits((127 + shift as u32) << 23)
+        };
+        top as f32 * scale
+    }
+
+    const fn magnitude_from_f64(d: f64) -> Self {
+        let bits = d.to_bits();
+        let exponent = ((bits >> 52) & 0x7ff) as i64;
+        if exponent < 1023 || exponent == 0x7ff {
+            return Self::ZERO;
+        }
+        let mantissa = (bits & ((1u64 << 52) - 1)) | (1u64 << 52);
+        let scale = exponent - 1075;
+        if scale >= 0 {
+            Self::from_low_limb(mantissa).shl_trunc(scale as usize)
+        } else {
+            Self::from_low_limb(mantissa >> (-scale) as u32)
+        }
+    }
+
+    const fn top128_sticky(&self) -> (u128, usize) {
+        let len = self.bit_len();
+        if len <= 128 {
+            return (self.to_u128(), 0);
+        }
+        let shift = len - 128;
+        let top = self.shr_bits(shift).to_u128();
+        (top | self.has_bits_below(shift) as u128, shift)
+    }
+
+    const fn magnitude_to_ieee(
+        &self,
+        negative: bool,
+        frac_bits: u32,
+        exp_bits: u32,
+        explicit: bool,
+    ) -> u128 {
+        let explicit_bit = explicit as u32;
+        let sign = (negative as u128) << (exp_bits + frac_bits + explicit_bit);
+        let (top, shift) = self.top128_sticky();
+        if top == 0 {
+            return sign;
+        }
+        let len = 128 - top.leading_zeros();
+        let keep = frac_bits + 1;
+        let mut exponent = len as i64 - 1 + shift as i64;
+        let mut mantissa;
+        if len <= keep {
+            mantissa = top << (keep - len);
+        } else {
+            let drop = len - keep;
+            mantissa = top >> drop;
+            let remainder = top & ((1u128 << drop) - 1);
+            let half = 1u128 << (drop - 1);
+            if remainder > half || (remainder == half && mantissa & 1 == 1) {
+                mantissa += 1;
+                if mantissa == 1u128 << keep {
+                    mantissa >>= 1;
+                    exponent += 1;
+                }
+            }
+        }
+        let biased = exponent + (1i64 << (exp_bits - 1)) - 1;
+        let max = (1i64 << exp_bits) - 1;
+        if biased >= max {
+            let fraction = if explicit { 1u128 << frac_bits } else { 0 };
+            return sign | ((max as u128) << (frac_bits + explicit_bit)) | fraction;
+        }
+        let fraction = if explicit {
+            mantissa
+        } else {
+            mantissa & ((1u128 << frac_bits) - 1)
+        };
+        sign | ((biased as u128) << (frac_bits + explicit_bit)) | fraction
+    }
+
+    const fn magnitude_from_ieee(
+        bits: u128,
+        frac_bits: u32,
+        exp_bits: u32,
+        explicit: bool,
+    ) -> (bool, Self) {
+        let explicit_bit = explicit as u32;
+        let negative = (bits >> (exp_bits + frac_bits + explicit_bit)) & 1 == 1;
+        let exponent = ((bits >> (frac_bits + explicit_bit)) & ((1u128 << exp_bits) - 1)) as i64;
+        let fraction = bits & ((1u128 << (frac_bits + explicit_bit)) - 1);
+        let max = (1i64 << exp_bits) - 1;
+        let unbiased = exponent - ((1i64 << (exp_bits - 1)) - 1);
+        if exponent == 0 || exponent == max || unbiased < 0 {
+            return (negative, Self::ZERO);
+        }
+        let mantissa = if explicit {
+            fraction
+        } else {
+            fraction | (1u128 << frac_bits)
+        };
+        let shift = unbiased - frac_bits as i64;
+        let magnitude = if shift >= 0 {
+            Self::from_u128(mantissa).shl_trunc(shift as usize)
+        } else {
+            Self::from_u128(mantissa >> (-shift) as u32)
+        };
+        (negative, magnitude)
+    }
+
+    const fn bit_len(&self) -> usize {
+        let mut i = LIMBS;
+
+        while i > 0 {
+            i -= 1;
+
+            let limb = self.limbs[i];
+            if limb != 0 {
+                return i * 64 + (64 - limb.leading_zeros() as usize);
+            }
+        }
+
+        0
+    }
+
+    const fn shl_trunc(self, shift: usize) -> Self {
+        let mut out = [0u64; LIMBS];
+
+        let limb_shift = shift / 64;
+        let bit_shift = shift % 64;
+
+        let mut i = 0;
+        while i < LIMBS {
+            let dst = i + limb_shift;
+
+            if dst < LIMBS {
+                out[dst] |= self.limbs[i] << bit_shift;
+
+                if bit_shift != 0 && dst + 1 < LIMBS {
+                    out[dst + 1] |= self.limbs[i] >> (64 - bit_shift);
+                }
+            }
+
+            i += 1;
+        }
+
+        Self::masked(out)
+    }
+
+    const fn shr_one(self) -> Self {
+        let mut out = [0u64; LIMBS];
+        let mut carry = 0u64;
+
+        let mut i = LIMBS;
+        while i > 0 {
+            i -= 1;
+
+            out[i] = (self.limbs[i] >> 1) | carry;
+            carry = self.limbs[i] << 63;
+        }
+
+        Self { limbs: out }
+    }
+
+    const fn div_rem_unsigned(self, rhs: Self) -> (Self, Self) {
+        if rhs.is_zero() {
+            panic!("attempt to divide by zero");
+        }
+
+        match self.cmp_magnitude(&rhs) {
+            Ordering::Less => {
+                return (Self::ZERO, self);
+            }
+            Ordering::Equal => {
+                return (Self::ONE, Self::ZERO);
+            }
+            Ordering::Greater => {}
+        }
+
+        let lhs_bits = self.bit_len();
+        let rhs_bits = rhs.bit_len();
+
+        let mut shift = lhs_bits - rhs_bits;
+        let mut divisor = rhs.shl_trunc(shift);
+        let mut remainder = self;
+        let mut quotient = [0u64; LIMBS];
+
+        loop {
+            match remainder.cmp_magnitude(&divisor) {
+                Ordering::Less => {}
+                Ordering::Equal | Ordering::Greater => {
+                    remainder = remainder.wrapping_sub(divisor);
+
+                    let limb = shift / 64;
+                    let bit = shift % 64;
+
+                    quotient[limb] |= 1u64 << bit;
+                }
+            }
+
+            if shift == 0 {
+                break;
+            }
+
+            divisor = divisor.shr_one();
+            shift -= 1;
+        }
+
+        (Self::masked(quotient), remainder)
+    }
+
+    const fn wrapping_div(self, rhs: Self) -> Self {
+        self.div_rem_unsigned(rhs).0
+    }
+
+    const fn wrapping_rem(self, rhs: Self) -> Self {
+        self.div_rem_unsigned(rhs).1
+    }
+
+    const fn wrapping_div_rem(self, rhs: Self) -> (Self, Self) {
+        self.div_rem_unsigned(rhs)
+    }
+
+    const fn bitand_bits(self, rhs: Self) -> Self {
+        let mut out = [0u64; LIMBS];
+
+        let mut i = 0;
+        while i < LIMBS {
+            out[i] = self.limbs[i] & rhs.limbs[i];
+            i += 1;
+        }
+
+        Self::masked(out)
+    }
+
+    const fn bitor_bits(self, rhs: Self) -> Self {
+        let mut out = [0u64; LIMBS];
+
+        let mut i = 0;
+        while i < LIMBS {
+            out[i] = self.limbs[i] | rhs.limbs[i];
+            i += 1;
+        }
+
+        Self::masked(out)
+    }
+
+    const fn bitxor_bits(self, rhs: Self) -> Self {
+        let mut out = [0u64; LIMBS];
+
+        let mut i = 0;
+        while i < LIMBS {
+            out[i] = self.limbs[i] ^ rhs.limbs[i];
+            i += 1;
+        }
+
+        Self::masked(out)
+    }
+
+    const fn bitnot(self) -> Self {
+        let mut out = [0u64; LIMBS];
+
+        let mut i = 0;
+        while i < LIMBS {
+            out[i] = !self.limbs[i];
+            i += 1;
+        }
+
+        Self::masked(out)
+    }
+
+    const fn shl_bits(self, shift: usize) -> Self {
+        if shift >= BITS {
+            return Self::ZERO;
+        }
+
+        if shift == 0 {
+            return self;
+        }
+
+        let limb_shift = shift / 64;
+        let bit_shift = shift % 64;
+
+        let mut out = [0u64; LIMBS];
+
+        let mut dst = LIMBS;
+        while dst > 0 {
+            dst -= 1;
+
+            if dst < limb_shift {
+                continue;
+            }
+
+            let src = dst - limb_shift;
+
+            out[dst] |= self.limbs[src] << bit_shift;
+
+            if bit_shift != 0 && src > 0 {
+                out[dst] |= self.limbs[src - 1] >> (64 - bit_shift);
+            }
+        }
+
+        Self::masked(out)
+    }
+
+    const fn shr_bits(self, shift: usize) -> Self {
+        if shift >= BITS {
+            return Self::ZERO;
+        }
+
+        if shift == 0 {
+            return self;
+        }
+
+        let limb_shift = shift / 64;
+        let bit_shift = shift % 64;
+
+        let mut out = [0u64; LIMBS];
+
+        let mut dst = 0;
+        while dst < LIMBS {
+            let src = dst + limb_shift;
+
+            if src < LIMBS {
+                out[dst] |= self.limbs[src] >> bit_shift;
+
+                if bit_shift != 0 && src + 1 < LIMBS {
+                    out[dst] |= self.limbs[src + 1] << (64 - bit_shift);
+                }
+            }
+
+            dst += 1;
+        }
+
+        Self::masked(out)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct BIntLimbs<const BITS: usize, const LIMBS: usize> {
+    bits: BUintLimbs<BITS, LIMBS>,
+}
+
+impl<const BITS: usize, const LIMBS: usize> BIntLimbs<BITS, LIMBS> {
+    const SIGN_LIMB: usize = (BITS - 1) / 64;
+    const SIGN_BIT: u32 = ((BITS - 1) % 64) as u32;
+
+    const fn from_i128(v: i128) -> Self {
+        Self {
+            bits: BUintLimbs::from_i128(v),
+        }
+    }
+
+    const fn from_u128(v: u128) -> Self {
+        Self {
+            bits: BUintLimbs::from_u128(v),
+        }
+    }
+
+    const fn to_i128(self) -> i128 {
+        let mut value = self.bits.to_u128();
+        if BITS < 128 && self.is_negative() {
+            value |= u128::MAX << (BITS % 128);
+        }
+        value as i128
+    }
+
+    const fn to_u128(self) -> u128 {
+        self.bits.to_u128()
+    }
+
+    const fn from_decimal_str(s: &str) -> Self {
+        let bytes = s.as_bytes();
+        let neg = !bytes.is_empty() && bytes[0] == b'-';
+        let ten = BUintLimbs::<BITS, LIMBS>::from_low_limb(10);
+        let mut acc = BUintLimbs::<BITS, LIMBS>::ZERO;
+        let mut i = if neg { 1 } else { 0 };
+        while i < bytes.len() {
+            let digit = BUintLimbs::<BITS, LIMBS>::from_low_limb((bytes[i] - b'0') as u64);
+            acc = acc.wrapping_mul(ten).wrapping_add(digit);
+            i += 1;
+        }
+        let magnitude = Self { bits: acc };
+        if neg {
+            magnitude.wrapping_neg()
+        } else {
+            magnitude
+        }
+    }
+
+    const fn is_negative(&self) -> bool {
+        (self.bits.limbs[Self::SIGN_LIMB] >> Self::SIGN_BIT) & 1 == 1
+    }
+
+    const fn to_f64(self) -> f64 {
+        if self.is_negative() {
+            -self.wrapping_neg().bits.magnitude_to_f64()
+        } else {
+            self.bits.magnitude_to_f64()
+        }
+    }
+
+    const fn to_f32(self) -> f32 {
+        if self.is_negative() {
+            -self.wrapping_neg().bits.magnitude_to_f32()
+        } else {
+            self.bits.magnitude_to_f32()
+        }
+    }
+
+    const fn to_ieee(self, frac_bits: u32, exp_bits: u32, explicit: bool) -> u128 {
+        if self.is_negative() {
+            self.wrapping_neg()
+                .bits
+                .magnitude_to_ieee(true, frac_bits, exp_bits, explicit)
+        } else {
+            self.bits
+                .magnitude_to_ieee(false, frac_bits, exp_bits, explicit)
+        }
+    }
+
+    const fn from_ieee(bits: u128, frac_bits: u32, exp_bits: u32, explicit: bool) -> Self {
+        let (negative, magnitude) =
+            BUintLimbs::magnitude_from_ieee(bits, frac_bits, exp_bits, explicit);
+        let value = Self { bits: magnitude };
+        if negative {
+            value.wrapping_neg()
+        } else {
+            value
+        }
+    }
+
+    const fn from_f64(d: f64) -> Self {
+        let magnitude = Self {
+            bits: BUintLimbs::magnitude_from_f64(d),
+        };
+        if d.is_sign_negative() {
+            magnitude.wrapping_neg()
+        } else {
+            magnitude
+        }
+    }
+
+    const fn wrapping_add(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits.wrapping_add(rhs.bits),
+        }
+    }
+
+    const fn wrapping_sub(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits.wrapping_sub(rhs.bits),
+        }
+    }
+
+    const fn wrapping_mul(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits.wrapping_mul(rhs.bits),
+        }
+    }
+
+    const fn wrapping_neg(self) -> Self {
+        Self {
+            bits: self.bits.wrapping_neg(),
+        }
+    }
+
+    const fn wrapping_div_rem(self, rhs: Self) -> (Self, Self) {
+        let lhs_negative = self.is_negative();
+        let rhs_negative = rhs.is_negative();
+
+        let lhs_magnitude = if lhs_negative {
+            self.bits.wrapping_neg()
+        } else {
+            self.bits
+        };
+
+        let rhs_magnitude = if rhs_negative {
+            rhs.bits.wrapping_neg()
+        } else {
+            rhs.bits
+        };
+
+        let (quotient, remainder) = lhs_magnitude.div_rem_unsigned(rhs_magnitude);
+
+        let quotient = if lhs_negative != rhs_negative {
+            quotient.wrapping_neg()
+        } else {
+            quotient
+        };
+
+        let remainder = if lhs_negative {
+            remainder.wrapping_neg()
+        } else {
+            remainder
+        };
+
+        (Self { bits: quotient }, Self { bits: remainder })
+    }
+
+    const fn bitand_bits(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits.bitand_bits(rhs.bits),
+        }
+    }
+
+    const fn bitor_bits(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits.bitor_bits(rhs.bits),
+        }
+    }
+
+    const fn bitxor_bits(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits.bitxor_bits(rhs.bits),
+        }
+    }
+
+    const fn bitnot(self) -> Self {
+        Self {
+            bits: self.bits.bitnot(),
+        }
+    }
+
+    const fn shl_bits(self, shift: usize) -> Self {
+        Self {
+            bits: self.bits.shl_bits(shift),
+        }
+    }
+
+    const fn shr_bits(self, shift: usize) -> Self {
+        let negative = self.is_negative();
+
+        if shift == 0 {
+            return self;
+        }
+
+        if shift >= BITS {
+            return if negative {
+                Self {
+                    bits: BUintLimbs::masked([u64::MAX; LIMBS]),
+                }
+            } else {
+                Self {
+                    bits: BUintLimbs::ZERO,
+                }
+            };
+        }
+
+        let mut out = self.bits.shr_bits(shift);
+
+        if !negative {
+            return Self { bits: out };
+        }
+
+        let first_bit = BITS - shift;
+        let first_limb = first_bit / 64;
+        let first_offset = first_bit % 64;
+
+        let mut i = first_limb;
+
+        if i < LIMBS {
+            out.limbs[i] |= u64::MAX << first_offset;
+            i += 1;
+        }
+
+        while i < LIMBS {
+            out.limbs[i] = u64::MAX;
+            i += 1;
+        }
+
+        Self {
+            bits: BUintLimbs::masked(out.limbs),
+        }
+    }
+
+    const fn cmp(&self, other: &Self) -> Ordering {
+        match (self.is_negative(), other.is_negative()) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => self.bits.cmp_magnitude(&other.bits),
+        }
+    }
+}

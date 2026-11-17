@@ -1,0 +1,8 @@
+*.log
+*.md
+!README.md
+barriers.json
+compile_commands.json
+summary.json
+cargo-target/
+cpython
